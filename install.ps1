@@ -8,10 +8,10 @@
 
 .EXAMPLE
     # Run directly:
-    irm https://raw.githubusercontent.com/pentsec/lazzyaddons/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.ps1 | iex
 
     # Or download and run:
-    Invoke-WebRequest -Uri https://raw.githubusercontent.com/pentsec/lazzyaddons/main/install.ps1 -OutFile install.ps1
+    Invoke-WebRequest -Uri https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.ps1 -OutFile install.ps1
     .\install.ps1
 
     # Install a specific version:
@@ -23,6 +23,13 @@
     # Skip checksum verification (not recommended):
     .\install.ps1 -Insecure
 #>
+
+[CmdletBinding()]
+param(
+    [string]$Version = "",
+    [string]$InstallDir = "",
+    [switch]$Insecure
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -306,15 +313,6 @@ function Show-NextSteps {
 # ============================================================================
 
 function Main {
-    [CmdletBinding()]
-    param(
-        [string]$Version = "",
-
-        [string]$InstallDir = "",
-
-        [switch]$Insecure
-    )
-
     Show-Banner
 
     $arch = Get-Platform
