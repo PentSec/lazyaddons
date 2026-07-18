@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Project binaries (repo root only)
+/lazyaddons
+/lazyaddons.exe
+/test-update
+/test-update.exe
+
+# Go workspace
+go.work
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Tool artifacts (not part of the project)
+.codegraph/
+ignore/
+ref/
+openspec/
+
+# Local config
+.atl/
+docs/
