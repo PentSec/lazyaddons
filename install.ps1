@@ -70,7 +70,7 @@ function Show-Banner {
     Write-Host " |_____|\__/|_._/|_| /\__,_|___/|___/ |_|   |____/" -ForegroundColor Cyan
     Write-Host "               |__/" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  WoW Addon Manager — Git-powered" -ForegroundColor DarkGray
+    Write-Host "  WoW Addon Manager - Git-powered" -ForegroundColor DarkGray
     Write-Host ""
 }
 
