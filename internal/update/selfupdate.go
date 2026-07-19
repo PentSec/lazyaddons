@@ -49,8 +49,8 @@ func SelfUpdate(releaseTag string) error {
 	version := strings.TrimPrefix(releaseTag, "v")
 	assetName := assetNameForPlatform(version)
 	url := fmt.Sprintf(
-		"%s/repos/%s/%s/releases/download/%s/%s",
-		"https://github.com", RepoOwner, RepoName, releaseTag, assetName,
+		"https://github.com/%s/%s/releases/download/%s/%s",
+		RepoOwner, RepoName, releaseTag, assetName,
 	)
 
 	// Download the archive to a temp file.
