@@ -1,67 +1,137 @@
-// Package gitops wraps the system `git` binary. We use os/exec
-// instead of go-git so we inherit the user's SSH keys, credential
-// helpers, GPG config, and platform-specific behaviours.
+// Package gitops provides git operations using go-git. The user
+// does not need git installed on their system.
 package gitops
 
 import (
 	"errors"
 	"fmt"
-	"os/exec"
+	"io"
+	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/storage/memory"
 )
 
-// run executes a git command in dir and returns its trimmed
-// stdout. It panics on non-zero exit, which is what we want in
-// production code — every caller treats a non-zero exit as fatal
-// and surfaces the error to the user.
-// Run executes an arbitrary git command in dir and returns its
-// trimmed stdout. Exported so callers can run infrequent git
-// operations (rev-list, status) without adding a dedicated
-// wrapper for each one.
-func Run(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+// openRepo opens an existing git repository at dir.
+func openRepo(dir string) (*git.Repository, *git.Worktree, error) {
+	r, err := git.PlainOpen(dir)
 	if err != nil {
-		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		return nil, nil, fmt.Errorf("gitops: open %s: %w", dir, err)
 	}
-	return string(out), nil
+	w, err := r.Worktree()
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitops: worktree %s: %w", dir, err)
+	}
+	return r, w, nil
 }
 
 // Clone clones a remote URL into dest, optionally checking out a
-// specific branch. An empty branch string is allowed and means
-// "whatever the remote HEAD points to".
-func Clone(url, dest, branch string) error {
+// specific ref. The ref may be a branch name, a tag name, or a
+// commit SHA; it is resolved automatically against the remote.
+// An empty ref means "whatever the remote HEAD points to".
+func Clone(url, dest, ref string) error {
 	if url == "" {
 		return errors.New("gitops: empty url")
 	}
 	if dest == "" {
 		return errors.New("gitops: empty dest")
 	}
-	args := []string{"clone"}
-	if branch != "" {
-		args = append(args, "--branch", branch)
+	opts := &git.CloneOptions{
+		URL:               url,
+		SingleBranch:      true,
+		RecurseSubmodules: git.NoRecurseSubmodules,
 	}
-	args = append(args, url, dest)
-	_, err := Run("", args...)
-	return err
-}
-
-// Pull runs `git pull` in dir. It does not take a branch because
-// the current branch is implicit; if you need to switch branches
-// first, use Checkout.
-func Pull(dir string) error {
-	if _, err := Run(dir, "pull", "--ff-only"); err != nil {
-		return err
+	if ref != "" {
+		refName, err := resolveRemoteRef(url, ref)
+		if err != nil {
+			return fmt.Errorf("gitops: clone %s: %w", url, err)
+		}
+		opts.ReferenceName = refName
+	}
+	_, err := git.PlainClone(dest, false, opts)
+	if err != nil {
+		return fmt.Errorf("gitops: clone %s: %w", url, err)
 	}
 	return nil
 }
 
-// Fetch runs `git fetch` against origin.
+// resolveRemoteRef asks the remote which kind of ref `ref` is
+// (branch, tag, or commit) and returns the fully-qualified
+// plumbing.ReferenceName to use for cloning. This avoids the
+// go-git default of always looking under refs/heads/, which
+// breaks when cloning a release tag.
+func resolveRemoteRef(url, ref string) (plumbing.ReferenceName, error) {
+	rem := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{url},
+	})
+	refs, err := rem.List(&git.ListOptions{})
+	if err != nil {
+		return "", fmt.Errorf("list remote: %w", err)
+	}
+	// Prefer branch, then tag.
+	branchRef := plumbing.NewBranchReferenceName(ref)
+	tagRef := plumbing.NewTagReferenceName(ref)
+	for _, r := range refs {
+		if r.Name() == branchRef {
+			return branchRef, nil
+		}
+	}
+	for _, r := range refs {
+		if r.Name() == tagRef {
+			return tagRef, nil
+		}
+	}
+	// Maybe it's a commit hash; let PlainClone resolve it directly
+	// by using it as branch ref name (go-git falls back to hash).
+	if h := plumbing.NewHash(ref); h != plumbing.ZeroHash {
+		return branchRef, nil
+	}
+	return "", fmt.Errorf("remote has no branch or tag named %q", ref)
+}
+
+// Fetch fetches from origin. Uses an explicit refspec to ensure
+// every remote branch is downloaded, even in single-branch clones
+// where the local remote config only covers a subset of refs.
 func Fetch(dir string) error {
-	if _, err := Run(dir, "fetch", "origin"); err != nil {
+	r, _, err := openRepo(dir)
+	if err != nil {
 		return err
+	}
+	err = r.Fetch(&git.FetchOptions{
+		RemoteName: "origin",
+		RefSpecs: []config.RefSpec{
+			config.RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+			config.RefSpec("+refs/tags/*:refs/tags/*"),
+		},
+	})
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("gitops: fetch: %w", err)
+	}
+	return nil
+}
+
+// Pull does a fast-forward-only pull from origin on the current branch.
+func Pull(dir string) error {
+	_, w, err := openRepo(dir)
+	if err != nil {
+		return err
+	}
+	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("gitops: pull: %w", err)
 	}
 	return nil
 }
@@ -72,21 +142,39 @@ func Checkout(dir, ref string) error {
 	if ref == "" {
 		return errors.New("gitops: empty ref")
 	}
-	if _, err := Run(dir, "checkout", ref); err != nil {
+	_, w, err := openRepo(dir)
+	if err != nil {
 		return err
 	}
-	return nil
+	if err := w.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(ref),
+	}); err == nil {
+		return nil
+	}
+	if err := w.Checkout(&git.CheckoutOptions{
+		Branch: plumbing.NewTagReferenceName(ref),
+	}); err == nil {
+		return nil
+	}
+	if h := plumbing.NewHash(ref); h != plumbing.ZeroHash {
+		if err := w.Checkout(&git.CheckoutOptions{Hash: h}); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("gitops: checkout %s: not a valid branch, tag, or commit", ref)
 }
 
 // HeadSHA returns the full 40-character SHA of the current HEAD.
-// It works on branch, tag, and detached HEAD alike because it
-// always reads `git rev-parse HEAD`.
 func HeadSHA(dir string) (string, error) {
-	out, err := Run(dir, "rev-parse", "HEAD")
+	r, _, err := openRepo(dir)
 	if err != nil {
 		return "", err
 	}
-	sha := strings.TrimSpace(out)
+	ref, err := r.Head()
+	if err != nil {
+		return "", fmt.Errorf("gitops: head: %w", err)
+	}
+	sha := ref.Hash().String()
 	if len(sha) != 40 {
 		return "", fmt.Errorf("gitops: expected 40-char SHA, got %q", sha)
 	}
@@ -94,15 +182,21 @@ func HeadSHA(dir string) (string, error) {
 }
 
 // RemoteURL returns the configured URL of the "origin" remote,
-// normalised to strip any trailing ".git" suffix. HTTPS URLs have
-// the suffix stripped per the design; SSH and local paths are
-// preserved as-is.
+// normalised to strip any trailing ".git" suffix.
 func RemoteURL(dir string) (string, error) {
-	out, err := Run(dir, "config", "--get", "remote.origin.url")
+	r, _, err := openRepo(dir)
 	if err != nil {
 		return "", err
 	}
-	url := strings.TrimSpace(out)
+	remote, err := r.Remote("origin")
+	if err != nil {
+		return "", fmt.Errorf("gitops: remote origin: %w", err)
+	}
+	cfg := remote.Config()
+	if len(cfg.URLs) == 0 {
+		return "", errors.New("gitops: origin has no URLs")
+	}
+	url := strings.TrimSpace(cfg.URLs[0])
 	url = strings.TrimSuffix(url, ".git")
 	return url, nil
 }
@@ -111,26 +205,301 @@ func RemoteURL(dir string) (string, error) {
 // It reads the remote HEAD symref that git sets up during clone
 // (origin/HEAD → origin/<branch>). Returns "" if detection fails.
 func DefaultBranch(dir string) string {
-	out, err := Run(dir, "symbolic-ref", "refs/remotes/origin/HEAD")
+	r, err := git.PlainOpen(dir)
 	if err != nil {
 		return ""
 	}
-	out = strings.TrimSpace(out)
-	// Output is "refs/remotes/origin/<branch>"
-	const prefix = "refs/remotes/origin/"
-	if strings.HasPrefix(out, prefix) {
-		return out[len(prefix):]
+	ref, err := r.Reference(plumbing.ReferenceName("refs/remotes/origin/HEAD"), true)
+	if err == nil {
+		name := ref.Name().String()
+		const prefix = "refs/remotes/origin/"
+		if strings.HasPrefix(name, prefix) {
+			return name[len(prefix):]
+		}
+	}
+	if branch := defaultBranchFromPackedRefs(dir); branch != "" {
+		return branch
+	}
+	for _, name := range []string{"main", "master"} {
+		_, err := r.Reference(plumbing.ReferenceName("refs/remotes/origin/"+name), true)
+		if err == nil {
+			return name
+		}
 	}
 	return ""
 }
 
+// defaultBranchFromPackedRefs reads .git/packed-refs and looks for
+// the origin/HEAD entry to determine the default branch.
+func defaultBranchFromPackedRefs(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, ".git", "packed-refs"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[len(fields)-1] != "refs/remotes/origin/HEAD" {
+			continue
+		}
+		if fields[0] == "ref:" && len(fields) >= 3 {
+			target := fields[1]
+			const originPrefix = "refs/remotes/origin/"
+			if strings.HasPrefix(target, originPrefix) {
+				return target[len(originPrefix):]
+			}
+		}
+	}
+	return ""
+}
+
+// ResetWorkingTree discards all local changes and restores the
+// working tree to match HEAD. Uses `git reset --hard` which is
+// more reliable than `git checkout -- .` when files were moved
+// out of the repo (os.Rename) — checkout fails to recreate
+// deleted directories, but reset --hard always works.
+func ResetWorkingTree(dir string) error {
+	_, w, err := openRepo(dir)
+	if err != nil {
+		return err
+	}
+	if err := w.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
+		return fmt.Errorf("gitops: reset worktree: %w", err)
+	}
+	return nil
+}
+
+// MergeFF performs a fast-forward merge from the given ref into the
+// current branch. Returns an error if the merge is not possible.
+func MergeFF(dir string, ref string) error {
+	r, w, err := openRepo(dir)
+	if err != nil {
+		return err
+	}
+	target, err := r.Reference(plumbing.ReferenceName(ref), true)
+	if err != nil {
+		return fmt.Errorf("gitops: resolve ref %s: %w", ref, err)
+	}
+	head, err := r.Head()
+	if err != nil {
+		return fmt.Errorf("gitops: head: %w", err)
+	}
+	if head.Hash() == target.Hash() {
+		return nil
+	}
+	isFF, err := walkAncestors(r, head.Hash(), target.Hash())
+	if err != nil {
+		return fmt.Errorf("gitops: ff check: %w", err)
+	}
+	if !isFF {
+		return fmt.Errorf("gitops: merge --ff-only: not a fast-forward")
+	}
+	if err := r.Storer.SetReference(
+		plumbing.NewHashReference(head.Name(), target.Hash()),
+	); err != nil {
+		return fmt.Errorf("gitops: update ref: %w", err)
+	}
+	if err := w.Checkout(&git.CheckoutOptions{Branch: head.Name()}); err != nil {
+		return fmt.Errorf("gitops: checkout after merge: %w", err)
+	}
+	return nil
+}
+
+// walkAncestors checks whether needleHash is an ancestor of startHash
+// by recursively walking parent commits. Returns true if found.
+func walkAncestors(r *git.Repository, needleHash, startHash plumbing.Hash) (bool, error) {
+	if needleHash == startHash {
+		return true, nil
+	}
+	commit, err := r.CommitObject(startHash)
+	if err != nil {
+		return false, err
+	}
+	iter := commit.Parents()
+	defer iter.Close()
+	for {
+		parent, err := iter.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			// Skip objects that can't be resolved (shallow repos).
+			continue
+		}
+		found, err := walkAncestors(r, needleHash, parent.Hash)
+		if err != nil {
+			return false, err
+		}
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// IsBehind returns true if HEAD is behind its upstream tracking
+// branch. Resolves the upstream by reading git config.
+func IsBehind(dir string) (bool, error) {
+	r, _, err := openRepo(dir)
+	if err != nil {
+		return false, err
+	}
+	head, err := r.Head()
+	if err != nil {
+		return false, nil
+	}
+	headName := head.Name().String()
+	if !strings.HasPrefix(headName, "refs/heads/") {
+		return isBehindRef(r, head.Hash(), "main") || isBehindRef(r, head.Hash(), "master"), nil
+	}
+	branchName := strings.TrimPrefix(headName, "refs/heads/")
+	cfg, err := r.Config()
+	if err != nil {
+		return false, nil
+	}
+	bcfg, ok := cfg.Branches[branchName]
+	if !ok || bcfg.Merge == "" {
+		return isBehindRef(r, head.Hash(), "main") || isBehindRef(r, head.Hash(), "master"), nil
+	}
+	remoteRef := strings.Replace(
+		string(bcfg.Merge),
+		"refs/heads/",
+		"refs/remotes/"+bcfg.Remote+"/",
+		1,
+	)
+	ref, err := r.Reference(plumbing.ReferenceName(remoteRef), true)
+	if err != nil {
+		return false, nil
+	}
+	return walkAncestors(r, head.Hash(), ref.Hash())
+}
+
+func isBehindRef(r *git.Repository, headHash plumbing.Hash, branch string) bool {
+	ref, err := r.Reference(plumbing.ReferenceName("refs/remotes/origin/"+branch), true)
+	if err != nil {
+		return false
+	}
+	behind, _ := walkAncestors(r, headHash, ref.Hash())
+	return behind
+}
+
+// LastCommitDate returns the date of the latest commit in
+// YYYY-MM-DD format.
+func LastCommitDate(dir string) string {
+	r, _, err := openRepo(dir)
+	if err != nil {
+		return ""
+	}
+	ref, err := r.Head()
+	if err != nil {
+		return ""
+	}
+	commit, err := r.CommitObject(ref.Hash())
+	if err != nil {
+		return ""
+	}
+	return commit.Committer.When.Format("2006-01-02")
+}
+
+// LatestNewTag returns the newest tag (by semver) in the repo that
+// is strictly newer than currentTag. Returns ("", nil) when the
+// addon is already on the latest tag.
+func LatestNewTag(dir, currentTag string) (string, error) {
+	r, _, err := openRepo(dir)
+	if err != nil {
+		return "", err
+	}
+	iter, err := r.Tags()
+	if err != nil {
+		return "", fmt.Errorf("gitops: list tags: %w", err)
+	}
+	defer iter.Close()
+
+	type tagInfo struct {
+		name    string
+		segments [3]int
+	}
+	var tags []tagInfo
+	cur := parseSemver(currentTag)
+
+	iter.ForEach(func(ref *plumbing.Reference) error {
+		name := strings.TrimPrefix(string(ref.Name()), "refs/tags/")
+		seg := parseSemver(name)
+		// Only include tags that are strictly newer than current.
+		if compareSemver(seg, cur) > 0 {
+			tags = append(tags, tagInfo{name: name, segments: seg})
+		}
+		return nil
+	})
+	if len(tags) == 0 {
+		return "", nil
+	}
+	sort.Slice(tags, func(i, j int) bool {
+		return compareSemver(tags[i].segments, tags[j].segments) > 0
+	})
+	return tags[0].name, nil
+}
+
+// CheckoutTag checks out a tag in detached HEAD mode and resets
+// the working tree to match.
+func CheckoutTag(dir, tag string) error {
+	if tag == "" {
+		return errors.New("gitops: empty tag")
+	}
+	r, _, err := openRepo(dir)
+	if err != nil {
+		return err
+	}
+	tagRef := plumbing.NewTagReferenceName(tag)
+	ref, err := r.Reference(tagRef, true)
+	if err != nil {
+		return fmt.Errorf("gitops: resolve tag %s: %w", tag, err)
+	}
+	// Detached HEAD: checkout by hash.
+	h, err := r.ResolveRevision(plumbing.Revision(ref.Hash().String()))
+	if err != nil {
+		return fmt.Errorf("gitops: resolve revision for tag %s: %w", tag, err)
+	}
+	_, w, err := openRepo(dir)
+	if err != nil {
+		return err
+	}
+	if err := w.Checkout(&git.CheckoutOptions{Hash: *h}); err != nil {
+		return fmt.Errorf("gitops: checkout tag %s: %w", tag, err)
+	}
+	return nil
+}
+
+// parseSemver extracts up to 3 numeric segments from a tag string.
+// Strips a leading 'v' or 'V'. Non-numeric segments are treated as 0.
+func parseSemver(s string) [3]int {
+	s = strings.TrimLeft(s, "vV")
+	parts := strings.SplitN(s, ".", 4)
+	var seg [3]int
+	for i := 0; i < 3 && i < len(parts); i++ {
+		seg[i], _ = strconv.Atoi(parts[i])
+	}
+	return seg
+}
+
+// compareSemver returns >0 if a is newer, <0 if b is newer, 0 if equal.
+func compareSemver(a, b [3]int) int {
+	for i := 0; i < 3; i++ {
+		if a[i] != b[i] {
+			return a[i] - b[i]
+		}
+	}
+	return 0
+}
+
 // SanitizeSegment strips path-traversal attempts and null bytes
-// from a user-supplied segment. It is exported because higher
-// layers (installer, UI) need the same defence when constructing
-// paths for git commands that take file arguments.
-//
-// Whitespace and Unicode are allowed: WoW addon folder names can
-// legitimately contain spaces and non-ASCII characters.
+// from a user-supplied segment.
 func SanitizeSegment(s string) (string, error) {
 	if s == "" {
 		return "", errors.New("gitops: empty segment")

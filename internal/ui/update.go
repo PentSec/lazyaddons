@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pentsec/lazyaddons/internal/addon"
+	"github.com/pentsec/lazyaddons/internal/config"
 	"github.com/pentsec/lazyaddons/internal/gitops"
 )
 
@@ -24,22 +25,34 @@ type updateAppliedMsg struct {
 }
 
 // checkAllUpdatesCmd checks every tracked addon for updates.
-func checkAllUpdatesCmd(addonsRoot string, names []string) tea.Cmd {
+// Branch-tracked addons use IsBehind; release-tracked addons use
+// LatestNewTag to detect new version tags.
+func checkAllUpdatesCmd(addonsRoot string, addons []config.Addon) tea.Cmd {
 	return func() tea.Msg {
-		statuses := make(map[string]AddonStatus, len(names))
-		for _, name := range names {
-			repoDir := findRepoDir(addonsRoot, name)
+		statuses := make(map[string]AddonStatus, len(addons))
+		for _, a := range addons {
+			repoDir := findRepoDir(addonsRoot, a.Name)
 			if repoDir == "" {
-				statuses[name] = StatusOK // no repo yet, treat as OK
+				statuses[a.Name] = StatusOK // no repo yet, treat as OK
 				continue
 			}
 			// Fetch may fail if offline — don't mark as error.
 			_ = gitops.Fetch(repoDir)
-			behind, _ := isBehind(repoDir)
-			if behind {
-				statuses[name] = StatusUpdate
+
+			if a.TrackMode == addon.TrackModeRelease {
+				newTag, _ := gitops.LatestNewTag(repoDir, a.TrackTarget)
+				if newTag != "" {
+					statuses[a.Name] = StatusUpdate
+				} else {
+					statuses[a.Name] = StatusOK
+				}
 			} else {
-				statuses[name] = StatusOK
+				behind, _ := isBehind(repoDir)
+				if behind {
+					statuses[a.Name] = StatusUpdate
+				} else {
+					statuses[a.Name] = StatusOK
+				}
 			}
 		}
 		return updatesCheckedMsg{Statuses: statuses}
@@ -47,62 +60,57 @@ func checkAllUpdatesCmd(addonsRoot string, names []string) tea.Cmd {
 }
 
 // applyAddonCmd applies the update for a single addon.
-func applyAddonCmd(addonsRoot, name string) tea.Cmd {
-	return applyUpdatesCmd(addonsRoot, []string{name})
+func applyAddonCmd(addonsRoot string, a config.Addon) tea.Cmd {
+	return applyUpdatesCmd(addonsRoot, []config.Addon{a})
 }
 
-// applyUpdatesCmd applies git pull + re-unpack for each behind
-// addon. It pulls in the repo then re-unpacks the addon dirs
-// into the AddOns root, overwriting old copies.
-func applyUpdatesCmd(addonsRoot string, behind []string) tea.Cmd {
+// applyUpdatesCmd applies updates for each addon. Branch-tracked
+// addons use Pull; release-tracked addons use CheckoutTag. All
+// addons get ResetWorkingTree + UnpackUpdate.
+func applyUpdatesCmd(addonsRoot string, addons []config.Addon) tea.Cmd {
 	return func() tea.Msg {
 		var updated []string
-		for _, name := range behind {
-			repoDir := findRepoDir(addonsRoot, name)
+		for _, a := range addons {
+			repoDir := findRepoDir(addonsRoot, a.Name)
 			if repoDir == "" {
 				continue
 			}
 
-			// Restore working tree and fast-forward to latest.
-			_, _ = gitops.Run(repoDir, "checkout", "--", ".")
+			// Restore working tree before any remote operation.
+			_ = gitops.ResetWorkingTree(repoDir)
 			_ = gitops.Fetch(repoDir)
-			// Fast-forward using the upstream tracking branch.
-			// @{u} works when the branch has a configured
-			// upstream (set automatically by git clone).
-			if _, err := gitops.Run(repoDir, "merge", "--ff-only", "@{u}"); err != nil {
-				// Detached HEAD or no upstream — try origin/<branch>.
-				if branch := gitops.DefaultBranch(repoDir); branch != "" {
-					_, _ = gitops.Run(repoDir, "merge", "--ff-only", "origin/"+branch)
+
+			if a.TrackMode == addon.TrackModeRelease {
+				// Release mode: find the new tag and checkout.
+				newTag, err := gitops.LatestNewTag(repoDir, a.TrackTarget)
+				if err != nil || newTag == "" {
+					continue
+				}
+				_ = gitops.CheckoutTag(repoDir, newTag)
+			} else {
+				// Branch mode: fast-forward to latest.
+				if err := gitops.Pull(repoDir); err != nil {
+					if branch := gitops.DefaultBranch(repoDir); branch != "" {
+						_ = gitops.MergeFF(repoDir, "refs/remotes/origin/"+branch)
+					}
 				}
 			}
 
+			// Sync working tree to the new HEAD.
+			_ = gitops.ResetWorkingTree(repoDir)
+
 			// Re-unpack: delete old dirs + move fresh copies to AddOns.
-			addon.UnpackUpdate(addonsRoot, repoDir)
-			updated = append(updated, name)
+			addon.UnpackUpdate(addonsRoot, repoDir, a.SubModules)
+			updated = append(updated, a.Name)
 		}
 		return updateAppliedMsg{Updated: updated}
 	}
 }
 
 // isBehind returns true if the repo's HEAD is behind its upstream
-// or remote tracking branch. Handles detached HEAD (tag checkout)
-// by falling back to detecting the default branch.
+// or remote tracking branch.
 func isBehind(dir string) (bool, error) {
-	out, err := gitops.Run(dir, "rev-list", "--count", "HEAD..@{u}")
-	if err == nil {
-		out = strings.TrimSpace(out)
-		return out != "0" && out != "", nil
-	}
-	// @{u} failed (detached HEAD or no upstream).
-	// Detect the default branch from the remote.
-	if branch := gitops.DefaultBranch(dir); branch != "" {
-		out, err = gitops.Run(dir, "rev-list", "--count", "HEAD..origin/"+branch)
-		if err == nil {
-			out = strings.TrimSpace(out)
-			return out != "0" && out != "", nil
-		}
-	}
-	return false, nil
+	return gitops.IsBehind(dir)
 }
 
 // findRepoDir returns the git repo directory for an addon.
@@ -128,13 +136,9 @@ func findRepoDir(addonsRoot, name string) string {
 }
 
 // lastCommitDate returns the date of the latest commit in YYYY-MM-DD
-// format using `git log -1 --format=%cs`.
+// format.
 func lastCommitDate(repoDir string) string {
-	out, err := gitops.Run(repoDir, "log", "-1", "--format=%cs")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
+	return gitops.LastCommitDate(repoDir)
 }
 
 // readTOCVersion reads the ## Version field from the addon's .toc file.

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -188,12 +187,11 @@ func scanExistingRepos(cfg *config.Config, addonsRoot string) {
 // getRemoteURL returns the origin URL of a git repo, or "" on
 // failure.
 func getRemoteURL(repoDir string) string {
-	cmd := exec.Command("git", "-C", repoDir, "config", "--get", "remote.origin.url")
-	out, err := cmd.Output()
+	url, err := gitops.RemoteURL(repoDir)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return url
 }
 
 // detectDefaultBranch returns the repo's default branch name by

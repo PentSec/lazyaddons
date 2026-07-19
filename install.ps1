@@ -100,13 +100,12 @@ function Test-Prerequisites {
 
     $missing = @()
     if (-not (Get-Command "curl" -ErrorAction SilentlyContinue)) { $missing += "curl" }
-    if (-not (Get-Command "git" -ErrorAction SilentlyContinue))  { $missing += "git" }
 
     if ($missing.Count -gt 0) {
         Stop-WithError "Missing required tools: $($missing -join ', '). Please install them and try again."
     }
 
-    Write-Success "curl and git are available"
+    Write-Success "curl is available"
 }
 
 # ============================================================================

@@ -114,15 +114,11 @@ check_prerequisites() {
         missing+=("curl")
     fi
 
-    if ! command -v git &>/dev/null; then
-        missing+=("git")
-    fi
-
     if [ ${#missing[@]} -gt 0 ]; then
         fatal "Missing required tools: ${missing[*]}. Please install them and try again."
     fi
 
-    success "curl and git are available"
+    success "curl is available"
 }
 
 # ============================================================================

@@ -177,11 +177,7 @@ func (m *Model) StartScreen() screen {
 // addons, it fires an automatic update check on startup.
 func (m Model) Init() tea.Cmd {
 	if len(m.Config.Addons) > 0 {
-		names := make([]string, len(m.Config.Addons))
-		for i, a := range m.Config.Addons {
-			names[i] = a.Name
-		}
-		return checkAllUpdatesCmd(string(m.WowPath), names)
+		return checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons)
 	}
 	return nil
 }

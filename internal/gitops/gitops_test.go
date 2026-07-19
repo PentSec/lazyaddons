@@ -307,3 +307,35 @@ func TestClone_ProducesWorkingRepo(t *testing.T) {
 		t.Errorf("cloned repo missing README: %v", err)
 	}
 }
+
+// TestClone_TagRef reproduces the release-clone bug: when a user
+// picks a GitHub release tag (e.g. "v3.0.6"), Clone must resolve
+// it against refs/tags/, not refs/heads/.
+func TestClone_TagRef(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("requires git binary")
+	}
+	t.Parallel()
+	requireGit(t)
+
+	remote := newBareRemote(t)
+	seedRemote(t, remote)
+	// Create a tag on the remote via a working clone.
+	work := newClone(t, remote)
+	runGit(t, work, "tag", "v3.0.6")
+	runGit(t, work, "push", "origin", "v3.0.6")
+
+	dest := filepath.Join(t.TempDir(), "DragonUI")
+	if err := Clone(remote, dest, "v3.0.6"); err != nil {
+		t.Fatalf("Clone by tag: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {
+		t.Errorf("cloned repo missing README: %v", err)
+	}
+	// HEAD should point at the tag's commit (detached).
+	got := strings.TrimSpace(runGit(t, dest, "rev-parse", "HEAD"))
+	want := strings.TrimSpace(runGit(t, dest, "rev-parse", "v3.0.6"))
+	if got != want {
+		t.Errorf("after tag-clone HEAD = %q, want %q", got, want)
+	}
+}

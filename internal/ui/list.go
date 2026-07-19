@@ -290,11 +290,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.Screen = screenProgress
 		m.ProgressLabel = "Checking for updates..."
-		names := make([]string, len(m.Config.Addons))
-		for i, a := range m.Config.Addons {
-			names[i] = a.Name
-		}
-		return *m, checkAllUpdatesCmd(string(m.WowPath), names)
+		return *m, checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons)
 	case "enter":
 		a := m.selectedAddon()
 		if a == nil || m.Statuses[a.Name] != StatusUpdate {
@@ -302,7 +298,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.Screen = screenProgress
 		m.ProgressLabel = fmt.Sprintf("Updating %s...", a.Name)
-		return *m, applyAddonCmd(string(m.WowPath), a.Name)
+		return *m, applyAddonCmd(string(m.WowPath), *a)
 	case "U":
 		if m.UpdateBanner == nil || !m.UpdateBanner.UpdateAvailable {
 			return *m, nil

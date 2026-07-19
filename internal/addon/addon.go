@@ -350,19 +350,40 @@ func PromoteAddonDirs(addonsRoot, cloneDir string) ([]string, error) {
 // counterpart to PromoteAddonDirs: it skips the install-only rename
 // step and force-overwrites old unpacked directories so the freshly
 // pulled files always land in the right place.
-func UnpackUpdate(addonsRoot, repoDir string) {
+//
+// knownSubDirs lists addon directory names previously unpacked for
+// this addon (from the config's sub_modules field). These are
+// ALWAYS cleaned from addonsRoot regardless of what the repo
+// currently contains, preventing orphaned directories when the
+// repo structure changes or ResetWorkingTree fails.
+func UnpackUpdate(addonsRoot, repoDir string, knownSubDirs []string) {
 	cloneBase := filepath.Base(repoDir)
 	subAddons := ScanTOCSubdirs(repoDir)
 	mainIsNested := hasSubAddon(subAddons, cloneBase)
 
-	// Delete old unpacked dirs from AddOns root.
+	// Merge known sub-dirs from config with what the repo
+	// currently contains. This ensures cleanup even when the
+	// repo is empty or has changed structure.
+	merged := make(map[string]bool)
 	for _, s := range subAddons {
+		merged[s] = true
+	}
+	for _, s := range knownSubDirs {
+		merged[s] = true
+	}
+	allSubs := make([]string, 0, len(merged))
+	for s := range merged {
+		allSubs = append(allSubs, s)
+	}
+
+	// Delete old unpacked dirs from AddOns root.
+	for _, s := range allSubs {
 		_ = os.RemoveAll(filepath.Join(addonsRoot, s))
 	}
 	_ = os.RemoveAll(filepath.Join(addonsRoot, cloneBase))
 
 	// Move subdirectories from repo to AddOns root.
-	for _, s := range subAddons {
+	for _, s := range allSubs {
 		src := filepath.Join(repoDir, s)
 		dst := filepath.Join(addonsRoot, s)
 		_ = os.RemoveAll(dst) // belt and suspenders
