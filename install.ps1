@@ -149,7 +149,7 @@ function Install-Binary {
     }
 
     $versionNumber = $versionTag.TrimStart("v")
-    $archiveName = "${BINARY_NAME}_${versionNumber}_${Arch}.zip"
+    $archiveName = "${BINARY_NAME}_${versionNumber}_windows_${Arch}.zip"
     $downloadUrl = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$versionTag/$archiveName"
     $checksumsUrl = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/download/$versionTag/checksums.txt"
 
