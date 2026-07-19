@@ -41,8 +41,7 @@ curl -sSL https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.sh |
 
 ```powershell
 # Windows (PowerShell)
-iwr -Uri https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.ps1 -OutFile install.ps1
-.\install.ps1
+irm https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.ps1 | iex
 ```
 
 ### Build from Source
@@ -53,7 +52,7 @@ cd lazyaddons
 go build -o lazyaddons ./cmd/lazyaddons/
 ```
 
-**Requirements**: Go 1.26+, `git` installed and available in `$PATH`.
+**Requirements**: Go 1.26+ (build from source only — pre-built binaries need nothing).
 
 ---
 
