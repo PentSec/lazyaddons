@@ -214,7 +214,10 @@ func DefaultBranch(dir string) string {
 		name := ref.Name().String()
 		const prefix = "refs/remotes/origin/"
 		if strings.HasPrefix(name, prefix) {
-			return name[len(prefix):]
+			branch := name[len(prefix):]
+			if branch != "HEAD" && branch != "" {
+				return branch
+			}
 		}
 	}
 	if branch := defaultBranchFromPackedRefs(dir); branch != "" {
@@ -278,7 +281,7 @@ func ResetWorkingTree(dir string) error {
 // MergeFF performs a fast-forward merge from the given ref into the
 // current branch. Returns an error if the merge is not possible.
 func MergeFF(dir string, ref string) error {
-	r, w, err := openRepo(dir)
+	r, _, err := openRepo(dir)
 	if err != nil {
 		return err
 	}
@@ -290,29 +293,40 @@ func MergeFF(dir string, ref string) error {
 	if err != nil {
 		return fmt.Errorf("gitops: head: %w", err)
 	}
-	if head.Hash() == target.Hash() {
+	headHash := head.Hash()
+	targetHash := target.Hash()
+	if headHash == targetHash {
 		return nil
 	}
-	isFF, err := walkAncestors(r, head.Hash(), target.Hash())
+	isFF, err := walkAncestors(r, headHash, targetHash)
 	if err != nil {
 		return fmt.Errorf("gitops: ff check: %w", err)
 	}
 	if !isFF {
 		return fmt.Errorf("gitops: merge --ff-only: not a fast-forward")
 	}
+	// Move the branch ref to the target commit.
 	if err := r.Storer.SetReference(
-		plumbing.NewHashReference(head.Name(), target.Hash()),
+		plumbing.NewHashReference(head.Name(), targetHash),
 	); err != nil {
 		return fmt.Errorf("gitops: update ref: %w", err)
 	}
-	if err := w.Checkout(&git.CheckoutOptions{Branch: head.Name()}); err != nil {
-		return fmt.Errorf("gitops: checkout after merge: %w", err)
+	// Re-open the repo to clear go-git's in-memory reference cache,
+	// then hard-reset the worktree to match the updated HEAD.
+	_, w2, err := openRepo(dir)
+	if err != nil {
+		return fmt.Errorf("gitops: reopen for reset: %w", err)
+	}
+	if err := w2.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
+		return fmt.Errorf("gitops: reset after merge: %w", err)
 	}
 	return nil
 }
 
 // walkAncestors checks whether needleHash is an ancestor of startHash
 // by recursively walking parent commits. Returns true if found.
+// The base case (needleHash == startHash) returns true because a
+// commit is considered an ancestor of itself.
 func walkAncestors(r *git.Repository, needleHash, startHash plumbing.Hash) (bool, error) {
 	if needleHash == startHash {
 		return true, nil
@@ -377,12 +391,18 @@ func IsBehind(dir string) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
+	if head.Hash() == ref.Hash() {
+		return false, nil
+	}
 	return walkAncestors(r, head.Hash(), ref.Hash())
 }
 
 func isBehindRef(r *git.Repository, headHash plumbing.Hash, branch string) bool {
 	ref, err := r.Reference(plumbing.ReferenceName("refs/remotes/origin/"+branch), true)
 	if err != nil {
+		return false
+	}
+	if headHash == ref.Hash() {
 		return false
 	}
 	behind, _ := walkAncestors(r, headHash, ref.Hash())

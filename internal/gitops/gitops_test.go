@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5"
 )
 
 // requireGit skips the test if the system has no `git` binary in
@@ -311,6 +313,210 @@ func TestClone_ProducesWorkingRepo(t *testing.T) {
 // TestClone_TagRef reproduces the release-clone bug: when a user
 // picks a GitHub release tag (e.g. "v3.0.6"), Clone must resolve
 // it against refs/tags/, not refs/heads/.
+// TestIsBehind_DetectsNewCommit verifies the core update detection
+// flow: after cloning via go-git's Clone (single-branch), pushing a
+// new commit to the remote, and Fetching, IsBehind must return true.
+// This is the scenario reported where branch-tracked addons fail to
+// detect remote updates.
+func TestIsBehind_DetectsNewCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("requires git binary")
+	}
+	t.Parallel()
+	requireGit(t)
+
+	remote := newBareRemote(t)
+	seedRemote(t, remote)
+
+	// Clone via go-git (matches the app's Clone function).
+	work := t.TempDir()
+	_, err := git.PlainClone(work, false, &git.CloneOptions{
+		URL:               remote,
+		SingleBranch:      true,
+		RecurseSubmodules: git.NoRecurseSubmodules,
+	})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	// At this point HEAD and origin/main should be equal → not behind.
+	if behind, err := IsBehind(work); err != nil {
+		t.Fatalf("IsBehind (initial): %v", err)
+	} else if behind {
+		t.Fatal("expected not behind after fresh clone")
+	}
+
+	// Push a new commit from another clone.
+	other := t.TempDir()
+	runGit(t, other, "clone", remote, ".")
+	runGit(t, other, "config", "user.email", "t@example.com")
+	runGit(t, other, "config", "user.name", "T")
+	if err := os.WriteFile(filepath.Join(other, "new.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, other, "add", "new.txt")
+	runGit(t, other, "commit", "-m", "new commit")
+	runGit(t, other, "push", "origin", "main")
+
+	// Fetch the original clone.
+	if err := Fetch(work); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	// Now IsBehind must detect that HEAD is behind origin/main.
+	if behind, err := IsBehind(work); err != nil {
+		t.Fatalf("IsBehind (after push): %v", err)
+	} else if !behind {
+		t.Fatal("expected behind after new commit pushed and fetched")
+	}
+}
+
+// TestIsBehind_DirtyWorktree is like TestIsBehind_DetectsNewCommit
+// but removes tracked files before the check, simulating the state
+// after UnpackUpdate moves addon files out of the repo.
+func TestIsBehind_DirtyWorktree(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("requires git binary")
+	}
+	t.Parallel()
+	requireGit(t)
+
+	remote := newBareRemote(t)
+	seedRemote(t, remote)
+
+	work := t.TempDir()
+	_, err := git.PlainClone(work, false, &git.CloneOptions{
+		URL:               remote,
+		SingleBranch:      true,
+		RecurseSubmodules: git.NoRecurseSubmodules,
+	})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	// Simulate UnpackUpdate: remove all tracked files from the workdir,
+	// leaving only .git behind. This is what happens after
+	// UnpackUpdate moves addon directories out via os.Rename.
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() == ".git" {
+			continue
+		}
+		os.RemoveAll(filepath.Join(work, e.Name()))
+	}
+
+	// Push a new commit from another clone.
+	other := t.TempDir()
+	runGit(t, other, "clone", remote, ".")
+	runGit(t, other, "config", "user.email", "t@example.com")
+	runGit(t, other, "config", "user.name", "T")
+	if err := os.WriteFile(filepath.Join(other, "new.txt"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, other, "add", "new.txt")
+	runGit(t, other, "commit", "-m", "new commit")
+	runGit(t, other, "push", "origin", "main")
+
+	// Fetch + check on dirty worktree.
+	if err := Fetch(work); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if behind, err := IsBehind(work); err != nil {
+		t.Fatalf("IsBehind (dirty): %v", err)
+	} else if !behind {
+		t.Fatal("expected behind with dirty worktree after new commit fetched")
+	}
+}
+
+// TestIsBehind_AfterMergeFF verifies the full apply flow:
+// Clone → MergeFF (simulating apply) → dirty worktree → new commit
+// pushed → Fetch → IsBehind detects it.
+func TestIsBehind_AfterMergeFF(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("requires git binary")
+	}
+	t.Parallel()
+	requireGit(t)
+
+	remote := newBareRemote(t)
+	seedRemote(t, remote)
+
+	work := t.TempDir()
+	_, err := git.PlainClone(work, false, &git.CloneOptions{
+		URL:               remote,
+		SingleBranch:      true,
+		RecurseSubmodules: git.NoRecurseSubmodules,
+	})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	// Push a second commit so MergeFF has something to merge.
+	other := t.TempDir()
+	runGit(t, other, "clone", remote, ".")
+	runGit(t, other, "config", "user.email", "t@example.com")
+	runGit(t, other, "config", "user.name", "T")
+	if err := os.WriteFile(filepath.Join(other, "second.txt"), []byte("second"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, other, "add", "second.txt")
+	runGit(t, other, "commit", "-m", "second commit")
+	runGit(t, other, "push", "origin", "main")
+
+	// Apply: Fetch + MergeFF (same as applyUpdatesCmd).
+	if err := Fetch(work); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	branch := DefaultBranch(work)
+	if branch == "" {
+		t.Fatal("DefaultBranch returned empty")
+	}
+	if err := MergeFF(work, "refs/remotes/origin/"+branch); err != nil {
+		t.Fatalf("MergeFF: %v", err)
+	}
+
+	// Simulate UnpackUpdate: remove tracked files.
+	entries, _ := os.ReadDir(work)
+	for _, e := range entries {
+		if e.Name() == ".git" {
+			continue
+		}
+		os.RemoveAll(filepath.Join(work, e.Name()))
+	}
+
+	// Should be up to date now.
+	if behind, err := IsBehind(work); err != nil {
+		t.Fatalf("IsBehind (after merge): %v", err)
+	} else if behind {
+		t.Fatal("expected not behind after MergeFF applied second commit")
+	}
+
+	// Push a THIRD commit.
+	other2 := t.TempDir()
+	runGit(t, other2, "clone", remote, ".")
+	runGit(t, other2, "config", "user.email", "t@example.com")
+	runGit(t, other2, "config", "user.name", "T")
+	if err := os.WriteFile(filepath.Join(other2, "third.txt"), []byte("third"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGit(t, other2, "add", "third.txt")
+	runGit(t, other2, "commit", "-m", "third commit")
+	runGit(t, other2, "push", "origin", "main")
+
+	// Fetch + check: must detect the new commit.
+	if err := Fetch(work); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if behind, err := IsBehind(work); err != nil {
+		t.Fatalf("IsBehind (after third commit): %v", err)
+	} else if !behind {
+		t.Fatal("expected behind after third commit pushed and fetched")
+	}
+}
+
 func TestClone_TagRef(t *testing.T) {
 	if testing.Short() {
 		t.Skipf("requires git binary")
