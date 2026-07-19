@@ -3,15 +3,45 @@ package update
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
+
+// ghLookPath is exec.LookPath for "gh". Package-level for testability.
+var ghLookPath = exec.LookPath
+
+// resolveGitHubToken returns a GitHub token for API auth, trying in order:
+// 1. GITHUB_TOKEN env var
+// 2. GH_TOKEN env var (gh CLI convention)
+// 3. `gh auth token` CLI output (if gh is available)
+// Returns empty string if none is available.
+func resolveGitHubToken() string {
+	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
+		return token
+	}
+	if token := strings.TrimSpace(os.Getenv("GH_TOKEN")); token != "" {
+		return token
+	}
+	if ghPath, err := ghLookPath("gh"); err == nil {
+		var out bytes.Buffer
+		cmd := exec.Command(ghPath, "auth", "token")
+		cmd.Stdout = &out
+		if err := cmd.Run(); err == nil {
+			if token := strings.TrimSpace(out.String()); token != "" {
+				return token
+			}
+		}
+	}
+	return ""
+}
 
 // SelfUpdate downloads the latest release binary and replaces
 // the current executable. Returns an error if the operation fails.
@@ -28,6 +58,10 @@ func SelfUpdate(releaseTag string) error {
 	if err != nil {
 		return fmt.Errorf("selfupdate: %w", err)
 	}
+	req.Header.Set("User-Agent", "lazyaddons-selfupdate")
+	if token := resolveGitHubToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("selfupdate: download: %w", err)
@@ -35,7 +69,7 @@ func SelfUpdate(releaseTag string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("selfupdate: download returned %d", resp.StatusCode)
+		return fmt.Errorf("selfupdate: download returned %d for %s", resp.StatusCode, url)
 	}
 
 	// Write archive to a temp file.
