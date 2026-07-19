@@ -171,6 +171,31 @@ func (c *Client) LatestRelease(owner, repo string) (*Release, error) {
 	return nil, nil
 }
 
+// ReleaseForTag returns the release whose TagName matches tag,
+// or nil if no such release exists.
+func (c *Client) ReleaseForTag(owner, repo, tag string) (*Release, error) {
+	all, err := c.ListReleases(owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if all[i].TagName == tag {
+			return &all[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// FindZipAsset returns the first .zip asset in the release, or nil.
+func (r *Release) FindZipAsset() *Asset {
+	for i := range r.Assets {
+		if strings.HasSuffix(strings.ToLower(r.Assets[i].Name), ".zip") {
+			return &r.Assets[i]
+		}
+	}
+	return nil
+}
+
 // DefaultBranch returns the default branch name of a GitHub
 // repository (e.g. "main", "master", "develop"). Returns "" on
 // failure so callers can fall back to git-based detection.

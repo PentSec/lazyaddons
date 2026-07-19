@@ -447,12 +447,14 @@ func LatestNewTag(dir, currentTag string) (string, error) {
 }
 
 // CheckoutTag checks out a tag in detached HEAD mode and resets
-// the working tree to match.
+// the working tree to match. Unlike w.Checkout, this works even
+// when the worktree has been modified (e.g. after UnpackUpdate
+// moved files out). It sets HEAD directly and hard-resets.
 func CheckoutTag(dir, tag string) error {
 	if tag == "" {
 		return errors.New("gitops: empty tag")
 	}
-	r, _, err := openRepo(dir)
+	r, w, err := openRepo(dir)
 	if err != nil {
 		return err
 	}
@@ -461,17 +463,20 @@ func CheckoutTag(dir, tag string) error {
 	if err != nil {
 		return fmt.Errorf("gitops: resolve tag %s: %w", tag, err)
 	}
-	// Detached HEAD: checkout by hash.
+	// Resolve annotated tag objects to the underlying commit.
 	h, err := r.ResolveRevision(plumbing.Revision(ref.Hash().String()))
 	if err != nil {
 		return fmt.Errorf("gitops: resolve revision for tag %s: %w", tag, err)
 	}
-	_, w, err := openRepo(dir)
-	if err != nil {
-		return err
+	// Detached HEAD: write HEAD directly to the commit hash,
+	// bypassing w.Checkout which fails on modified worktrees.
+	if err := r.Storer.SetReference(
+		plumbing.NewHashReference(plumbing.HEAD, *h),
+	); err != nil {
+		return fmt.Errorf("gitops: set HEAD for tag %s: %w", tag, err)
 	}
-	if err := w.Checkout(&git.CheckoutOptions{Hash: *h}); err != nil {
-		return fmt.Errorf("gitops: checkout tag %s: %w", tag, err)
+	if err := w.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
+		return fmt.Errorf("gitops: reset after tag %s: %w", tag, err)
 	}
 	return nil
 }

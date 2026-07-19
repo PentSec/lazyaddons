@@ -298,7 +298,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.Screen = screenProgress
 		m.ProgressLabel = fmt.Sprintf("Updating %s...", a.Name)
-		return *m, applyAddonCmd(string(m.WowPath), *a)
+		return *m, applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.Config)
 	case "U":
 		if m.UpdateBanner == nil || !m.UpdateBanner.UpdateAvailable {
 			return *m, nil
