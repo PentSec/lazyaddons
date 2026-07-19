@@ -8,7 +8,7 @@ import (
 
 func TestAssetNameForPlatform_returnsNonEmpty(t *testing.T) {
 	t.Parallel()
-	name := assetNameForPlatform()
+	name := assetNameForPlatform("1.2.3")
 	if name == "" {
 		t.Error("assetNameForPlatform() returned empty string")
 	}
@@ -16,7 +16,7 @@ func TestAssetNameForPlatform_returnsNonEmpty(t *testing.T) {
 
 func TestAssetNameForPlatform_lowercase(t *testing.T) {
 	t.Parallel()
-	name := assetNameForPlatform()
+	name := assetNameForPlatform("1.2.3")
 	if strings.ToLower(name) != name {
 		t.Errorf("assetNameForPlatform() = %q, expected lowercase", name)
 	}
@@ -24,7 +24,7 @@ func TestAssetNameForPlatform_lowercase(t *testing.T) {
 
 func TestAssetNameForPlatform_containsOSArch(t *testing.T) {
 	t.Parallel()
-	name := assetNameForPlatform()
+	name := assetNameForPlatform("1.2.3")
 	if !strings.Contains(name, runtime.GOOS) {
 		t.Errorf("assetNameForPlatform() = %q, missing GOOS %q", name, runtime.GOOS)
 	}
@@ -33,9 +33,17 @@ func TestAssetNameForPlatform_containsOSArch(t *testing.T) {
 	}
 }
 
+func TestAssetNameForPlatform_containsVersion(t *testing.T) {
+	t.Parallel()
+	name := assetNameForPlatform("1.2.3")
+	if !strings.Contains(name, "1.2.3") {
+		t.Errorf("assetNameForPlatform() = %q, missing version", name)
+	}
+}
+
 func TestAssetNameForPlatform_platformExtension(t *testing.T) {
 	t.Parallel()
-	name := assetNameForPlatform()
+	name := assetNameForPlatform("1.2.3")
 	if runtime.GOOS == "windows" {
 		if !strings.HasSuffix(name, ".zip") {
 			t.Errorf("assetNameForPlatform() = %q, expected .zip on windows", name)

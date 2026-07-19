@@ -1,24 +1,29 @@
 package update
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // SelfUpdate downloads the latest release binary and replaces
 // the current executable. Returns an error if the operation fails.
 func SelfUpdate(releaseTag string) error {
-	assetName := assetNameForPlatform()
+	version := strings.TrimPrefix(releaseTag, "v")
+	assetName := assetNameForPlatform(version)
 	url := fmt.Sprintf(
 		"%s/repos/%s/%s/releases/download/%s/%s",
 		"https://github.com", RepoOwner, RepoName, releaseTag, assetName,
 	)
 
-	// Download the binary to a temp file.
+	// Download the archive to a temp file.
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("selfupdate: %w", err)
@@ -33,8 +38,28 @@ func SelfUpdate(releaseTag string) error {
 		return fmt.Errorf("selfupdate: download returned %d", resp.StatusCode)
 	}
 
-	// Write to a temp file in the same directory as the executable
-	// so the atomic rename works (same filesystem).
+	// Write archive to a temp file.
+	tmpArchive, err := os.CreateTemp("", "lazyaddons-archive-*")
+	if err != nil {
+		return fmt.Errorf("selfupdate: temp file: %w", err)
+	}
+	tmpArchivePath := tmpArchive.Name()
+	defer os.Remove(tmpArchivePath)
+
+	if _, err := io.Copy(tmpArchive, resp.Body); err != nil {
+		tmpArchive.Close()
+		return fmt.Errorf("selfupdate: write archive: %w", err)
+	}
+	tmpArchive.Close()
+
+	// Extract the binary from the archive.
+	binPath, err := extractBinary(tmpArchivePath, assetName)
+	if err != nil {
+		return fmt.Errorf("selfupdate: extract: %w", err)
+	}
+	defer os.Remove(binPath)
+
+	// Get current executable path.
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("selfupdate: executable path: %w", err)
@@ -44,6 +69,8 @@ func SelfUpdate(releaseTag string) error {
 		return fmt.Errorf("selfupdate: resolve symlink: %w", err)
 	}
 
+	// Write to a temp file in the same directory as the executable
+	// so the atomic rename works (same filesystem).
 	tmp, err := os.CreateTemp(filepath.Dir(exe), "lazyaddons-*.tmp")
 	if err != nil {
 		return fmt.Errorf("selfupdate: temp file: %w", err)
@@ -51,7 +78,13 @@ func SelfUpdate(releaseTag string) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	src, err := os.Open(binPath)
+	if err != nil {
+		return fmt.Errorf("selfupdate: open binary: %w", err)
+	}
+	defer src.Close()
+
+	if _, err := io.Copy(tmp, src); err != nil {
 		tmp.Close()
 		return fmt.Errorf("selfupdate: write binary: %w", err)
 	}
@@ -73,15 +106,92 @@ func SelfUpdate(releaseTag string) error {
 	return nil
 }
 
+// extractBinary extracts the lazyaddons binary from an archive
+// (tar.gz on Linux/macOS, zip on Windows) and returns the path
+// to the extracted binary.
+func extractBinary(archivePath, archiveName string) (string, error) {
+	if strings.HasSuffix(archivePath, ".zip") || strings.Contains(archiveName, ".zip") {
+		return extractFromZip(archivePath)
+	}
+	return extractFromTarGz(archivePath)
+}
+
+func extractFromZip(archivePath string) (string, error) {
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		name := filepath.Base(f.Name)
+		if name == "lazyaddons" || name == "lazyaddons.exe" {
+			out, err := os.CreateTemp("", "lazyaddons-bin-*")
+			if err != nil {
+				return "", err
+			}
+			rc, err := f.Open()
+			if err != nil {
+				out.Close()
+				return "", err
+			}
+			if _, err := io.Copy(out, rc); err != nil {
+				rc.Close()
+				out.Close()
+				return "", err
+			}
+			rc.Close()
+			out.Close()
+			return out.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("lazyaddons binary not found in zip")
+}
+
+func extractFromTarGz(archivePath string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return "", err
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		name := filepath.Base(hdr.Name)
+		if name == "lazyaddons" {
+			out, err := os.CreateTemp("", "lazyaddons-bin-*")
+			if err != nil {
+				return "", err
+			}
+			if _, err := io.Copy(out, tr); err != nil {
+				out.Close()
+				return "", err
+			}
+			out.Close()
+			return out.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("lazyaddons binary not found in tar.gz")
+}
+
 // assetNameForPlatform returns the asset filename for the current
 // OS and architecture. The naming matches GoReleaser's name_template:
-// "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}". The version is in the
-// release download URL path, not in the filename.
-func assetNameForPlatform() string {
+// "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}".
+func assetNameForPlatform(version string) string {
 	switch runtime.GOOS {
 	case "windows":
-		return fmt.Sprintf("lazyaddons_windows_%s.zip", runtime.GOARCH)
+		return fmt.Sprintf("lazyaddons_%s_windows_%s.zip", version, runtime.GOARCH)
 	default:
-		return fmt.Sprintf("lazyaddons_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+		return fmt.Sprintf("lazyaddons_%s_%s_%s.tar.gz", version, runtime.GOOS, runtime.GOARCH)
 	}
 }
