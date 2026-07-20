@@ -67,6 +67,13 @@ func run() error {
 		}
 	}
 
+	// Persist the resolved path so it survives restarts.
+	// This covers auto-detection: the config may have an empty
+	// WoWPath that was saved before the user configured one.
+	if path != "" && cfg.WoWPath == "" {
+		cfg.WoWPath = string(path)
+	}
+
 	// Remove addons that no longer exist on disk (user deleted
 	// them manually outside the TUI).
 		if path != "" {
