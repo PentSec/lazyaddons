@@ -1,11 +1,35 @@
 package ui
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/pentsec/lazyaddons/internal/config"
 )
+
+// goldenTestProfile returns a v2 Config with a single active
+// profile "Retail" holding the standard fixture addons. Tests
+// that need a v2 fixture (e.g. golden-file comparison) build
+// their model on top of this.
+func goldenTestProfile() *config.Config {
+	return &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:   "golden-profile-id",
+				Name: "Retail",
+				WoWPath: "/tmp/wow/Interface/AddOns",
+				Addons: []config.Addon{
+					{Name: "Atlas", TrackMode: "branch", TrackTarget: "main", CurrentSHA: "abc1234"},
+					{Name: "Bagnon", TrackMode: "release", TrackTarget: "v1.0.0", CurrentSHA: "def5678"},
+					{Name: "Details", TrackMode: "branch", TrackTarget: "main", CurrentSHA: "9990000"},
+				},
+			},
+		},
+		ActiveProfileID: "golden-profile-id",
+	}
+}
 
 // TestListView_GoldenFile renders the list view and compares the
 // result to a checked-in golden file. Update the golden with
@@ -24,11 +48,8 @@ func TestListView_GoldenFile(t *testing.T) {
 	m := NewModel()
 	m.Width = 80
 	m.Height = 24
-	m.Config = &config.Config{Version: 1, Addons: []config.Addon{
-		{Name: "Atlas", TrackMode: "branch", TrackTarget: "main", CurrentSHA: "abc1234"},
-		{Name: "Bagnon", TrackMode: "release", TrackTarget: "v1.0.0", CurrentSHA: "def5678"},
-		{Name: "Details", TrackMode: "branch", TrackTarget: "main", CurrentSHA: "9990000"},
-	}}
+	m.Config = goldenTestProfile()
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Statuses = map[string]AddonStatus{
 		"Atlas":   StatusOK,
 		"Bagnon":  StatusUpdate,
@@ -66,11 +87,23 @@ func TestListView_ContainsAllAddons(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
 	m.Width = 80
-	m.Config = &config.Config{Version: 1, Addons: []config.Addon{
-		{Name: "Atlas"},
-		{Name: "Bagnon"},
-		{Name: "Details"},
-	}}
+	m.Config = &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:      "p1",
+				Name:    "Retail",
+				WoWPath: "/tmp/wow/Interface/AddOns",
+				Addons: []config.Addon{
+					{Name: "Atlas"},
+					{Name: "Bagnon"},
+					{Name: "Details"},
+				},
+			},
+		},
+		ActiveProfileID: "p1",
+	}
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Statuses = map[string]AddonStatus{
 		"Atlas":   StatusOK,
 		"Bagnon":  StatusUpdate,
@@ -99,9 +132,20 @@ func TestKeyboardNavigation_DownArrow(t *testing.T) {
 	t.Parallel()
 	m := *NewModel()
 	m.Width = 80
-	m.Config = &config.Config{Version: 1, Addons: []config.Addon{
-		{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"},
-	}}
+	m.Config = &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:   "p1",
+				Name: "Retail",
+				Addons: []config.Addon{
+					{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"},
+				},
+			},
+		},
+		ActiveProfileID: "p1",
+	}
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Selection = 0
 
 	// 3 down presses should move from index 0 to index 3.
@@ -118,9 +162,20 @@ func TestKeyboardNavigation_UpArrow(t *testing.T) {
 	t.Parallel()
 	m := *NewModel()
 	m.Width = 80
-	m.Config = &config.Config{Version: 1, Addons: []config.Addon{
-		{Name: "A"}, {Name: "B"}, {Name: "C"},
-	}}
+	m.Config = &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:   "p1",
+				Name: "Retail",
+				Addons: []config.Addon{
+					{Name: "A"}, {Name: "B"}, {Name: "C"},
+				},
+			},
+		},
+		ActiveProfileID: "p1",
+	}
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Selection = 2
 
 	updated, _ := m.Update(upKey())
@@ -134,7 +189,20 @@ func TestKeyboardNavigation_ShortcutKeys(t *testing.T) {
 	t.Parallel()
 	m := *NewModel()
 	m.Width = 80
-	m.Config = &config.Config{Version: 1, Addons: []config.Addon{{Name: "A"}}}
+	m.Config = &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:   "p1",
+				Name: "Retail",
+				Addons: []config.Addon{
+					{Name: "A"},
+				},
+			},
+		},
+		ActiveProfileID: "p1",
+	}
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 
 	updated, _ := m.Update(charKey('a'))
 	m = updated.(Model)
@@ -143,18 +211,21 @@ func TestKeyboardNavigation_ShortcutKeys(t *testing.T) {
 	}
 }
 
-// updateGolden reports whether the -update flag was passed.
+// updateGolden reports whether the user asked to refresh the
+// golden file. We look for both the env var and a CLI flag
+// because `go test` rejects unknown flags in the test binary's
+// argv. The env var is the reliable path:
+//
+//	UPDATE_GOLDEN=1 go test ./internal/ui -run TestListView_GoldenFile
+//
+// The -update CLI path is also tried (read from os.Args by the
+// readArgs helper) for users who manage to pass it through.
 func updateGolden() bool {
-	for _, arg := range []string{"-update", "-update-golden"} {
-		for _, a := range []string{"-test.run", "-args"} {
-			_ = a
-		}
-		_ = arg
+	if os.Getenv("UPDATE_GOLDEN") != "" {
+		return true
 	}
-	// Go's testing package doesn't expose the flag list
-	// portably; we read os.Args ourselves.
 	for _, a := range readArgs() {
-		if a == "-update" {
+		if a == "-update" || a == "-update-golden" {
 			return true
 		}
 	}

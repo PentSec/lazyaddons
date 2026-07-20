@@ -111,9 +111,15 @@ func updateWowBrowse(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.WowBrowseError = err.Error()
 			return *m, nil
 		}
-		m.WowPath = p
-		m.Config.WoWPath = p.String()
 		m.WowBrowseError = ""
+		if m.PendingProfileName != "" {
+			m.PendingProfilePath = p.String()
+			return acceptPath(m)
+		}
+		m.WowPath = p
+		if m.ActiveProfile != nil {
+			m.ActiveProfile.WoWPath = p.String()
+		}
 		m.Screen = screenList
 		return *m, nil
 	}

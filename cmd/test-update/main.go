@@ -25,14 +25,23 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Press U to trigger self-update (will fail offline)\n")
 
 	cfg := config.Default()
-	cfg.Addons = []config.Addon{
-		{Name: "Atlas", TrackMode: "branch", TrackTarget: "main"},
-		{Name: "Bagnon", TrackMode: "release", TrackTarget: "v1.0.0"},
-		{Name: "Details", TrackMode: "branch", TrackTarget: "main"},
+	cfg.Profiles = []config.Profile{
+		{
+			ID:      "demo-profile-id",
+			Name:    "Demo",
+			WoWPath: "/tmp/wow/Interface/AddOns",
+			Addons: []config.Addon{
+				{Name: "Atlas", TrackMode: "branch", TrackTarget: "main"},
+				{Name: "Bagnon", TrackMode: "release", TrackTarget: "v1.0.0"},
+				{Name: "Details", TrackMode: "branch", TrackTarget: "main"},
+			},
+		},
 	}
+	cfg.ActiveProfileID = "demo-profile-id"
 
 	model := ui.NewModel()
 	model.Config = cfg
+	model.SetActiveProfile(cfg.FindProfileByID(cfg.ActiveProfileID))
 	model.UpdateBanner = &update.CheckResult{
 		UpdateAvailable: true,
 		CurrentVersion:  "1.0.0",

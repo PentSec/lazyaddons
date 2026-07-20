@@ -13,8 +13,13 @@ func TestResolveVersion_ldflagsOverride(t *testing.T) {
 	}
 }
 
+// The following tests mutate the package-level buildInfoReader
+// to inject fake debug.BuildInfo values. They must NOT run in
+// parallel: t.Parallel + unsynchronised global mutation trips the
+// race detector. They are also very fast, so serial execution
+// has no measurable cost.
+
 func TestResolveVersion_ldflagsDevNoBuildInfo(t *testing.T) {
-	t.Parallel()
 	defer func(orig func() (*debug.BuildInfo, bool)) {
 		buildInfoReader = orig
 	}(buildInfoReader)
@@ -27,7 +32,6 @@ func TestResolveVersion_ldflagsDevNoBuildInfo(t *testing.T) {
 }
 
 func TestResolveVersion_ldflagsDevBuildInfoDevel(t *testing.T) {
-	t.Parallel()
 	defer func(orig func() (*debug.BuildInfo, bool)) {
 		buildInfoReader = orig
 	}(buildInfoReader)
@@ -42,7 +46,6 @@ func TestResolveVersion_ldflagsDevBuildInfoDevel(t *testing.T) {
 }
 
 func TestResolveVersion_ldflagsDevBuildInfoEmpty(t *testing.T) {
-	t.Parallel()
 	defer func(orig func() (*debug.BuildInfo, bool)) {
 		buildInfoReader = orig
 	}(buildInfoReader)
@@ -57,7 +60,6 @@ func TestResolveVersion_ldflagsDevBuildInfoEmpty(t *testing.T) {
 }
 
 func TestResolveVersion_ldflagsDevBuildInfoTagged(t *testing.T) {
-	t.Parallel()
 	defer func(orig func() (*debug.BuildInfo, bool)) {
 		buildInfoReader = orig
 	}(buildInfoReader)

@@ -129,17 +129,17 @@ func TestUpdate_GitHubAPIFailure(t *testing.T) {
 
 func TestUpdate_AggregateSummary(t *testing.T) {
 	t.Parallel()
-	cfg := &config.Config{Version: 1, Addons: []config.Addon{
+	cfg := v2ConfigWithAddons([]config.Addon{
 		{Name: "A", URL: "u1", TrackMode: addon.TrackModeBranch, TrackTarget: "main"},
 		{Name: "B", URL: "u2", TrackMode: addon.TrackModeBranch, TrackTarget: "main"},
 		{Name: "C", URL: "u3", TrackMode: addon.TrackModeBranch, TrackTarget: "main"},
-	}}
+	}, "")
 	summary := struct {
 		Total   int
 		Update  int
 		Error   int
 		Current int
-	}{Total: len(cfg.Addons), Update: 1, Error: 1, Current: 1}
+	}{Total: len(cfg.Profiles[0].Addons), Update: 1, Error: 1, Current: 1}
 	if summary.Total != 3 {
 		t.Errorf("Total = %d, want 3", summary.Total)
 	}

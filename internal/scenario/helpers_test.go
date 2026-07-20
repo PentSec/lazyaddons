@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/pentsec/lazyaddons/internal/config"
 )
 
 // requireGit skips the test if git is not available.
@@ -13,6 +15,30 @@ func requireGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git not in PATH: %v", err)
+	}
+}
+
+// v2ConfigWithAddons returns a v2 Config with a single "Default"
+// profile (ID "p1") owning the given addons and the supplied
+// WoW path. Tests use this to build a v2-shaped fixture without
+// hand-rolling the same struct literal in every file.
+//
+// The profile is set as the active profile.
+func v2ConfigWithAddons(addons []config.Addon, wowPath string) *config.Config {
+	if wowPath == "" {
+		wowPath = "/wow/Interface/AddOns"
+	}
+	return &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:      "p1",
+				Name:    "Default",
+				WoWPath: wowPath,
+				Addons:  addons,
+			},
+		},
+		ActiveProfileID: "p1",
 	}
 }
 

@@ -122,7 +122,7 @@ func submitAddForm(m *Model) (tea.Model, tea.Cmd) {
 		m.AddError = err.Error()
 		return *m, nil
 	}
-	if m.Config.AddonByName(name) != nil {
+	if m.ActiveProfile != nil && m.ActiveProfile.AddonByName(name) != nil {
 		m.AddError = fmt.Sprintf("addon %q is already tracked", name)
 		return *m, nil
 	}
@@ -162,7 +162,7 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 	newRepoDir := filepath.Join(addonsRoot, ".lazyaddons", name)
 	if st, err := os.Stat(newRepoDir); err == nil && st.IsDir() {
 		if gi, err := os.Stat(filepath.Join(newRepoDir, ".git")); err == nil && gi.IsDir() {
-			m.Config.UpsertAddon(config.Addon{
+			m.ActiveProfile.UpsertAddon(config.Addon{
 				Name: name, URL: url,
 				TrackMode: mode, TrackTarget: target,
 			})
@@ -175,7 +175,7 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 	oldRepoDir := filepath.Join(addonsRoot, name+".repo")
 	if st, err := os.Stat(oldRepoDir); err == nil && st.IsDir() {
 		if gi, err := os.Stat(filepath.Join(oldRepoDir, ".git")); err == nil && gi.IsDir() {
-			m.Config.UpsertAddon(config.Addon{
+			m.ActiveProfile.UpsertAddon(config.Addon{
 				Name: name, URL: url,
 				TrackMode: mode, TrackTarget: target,
 			})
@@ -252,7 +252,7 @@ func (m *Model) handleCloneDone(msg cloneDoneMsg) {
 		_ = os.Rename(oldRepo, newRepo)
 	}
 
-	m.Config.UpsertAddon(config.Addon{
+	m.ActiveProfile.UpsertAddon(config.Addon{
 		Name:        actualName,
 		URL:         msg.URL,
 		TrackMode:   msg.Mode,

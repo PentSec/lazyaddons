@@ -51,40 +51,74 @@ func run() error {
 		cfg = config.Default()
 	}
 
-	// Resolve the WoW path. If the config has one, use it;
-	// otherwise fall back to auto-detection.
+	// First-run / no-profiles case: hand off to the UI on the
+	// profile-add screen so the user must create one before
+	// anything else. The save on exit persists the new profile.
+	if len(cfg.Profiles) == 0 {
+		model := ui.NewModel()
+		model.Config = cfg
+		model.Screen = model.StartScreen() // screenProfileAdd
+
+		if result := update.CheckLatest(app.Version); result != nil {
+			if result.UpdateAvailable {
+				model.UpdateBanner = result
+			}
+		}
+
+		prog := tea.NewProgram(model, tea.WithAltScreen())
+		if _, err := prog.Run(); err != nil {
+			return fmt.Errorf("run program: %w", err)
+		}
+		if err := config.Save(cfg); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+		return nil
+	}
+
+	// Existing profiles: resolve the active one and scope all
+	// path-consuming bootstrap work to it. The active profile's
+	// path drives prune + scan; m.WoWPath is kept in sync via
+	// setActiveProfile so existing code that reads m.WoWPath
+	// works unchanged.
+	active := cfg.FindProfileByID(cfg.ActiveProfileID)
+	if active == nil {
+		// Validate() should have reset a stale ActiveProfileID;
+		// this is a defensive fallback.
+		active = &cfg.Profiles[0]
+		cfg.ActiveProfileID = active.ID
+	}
+
 	var path wowpath.Path
-	if cfg.WoWPath != "" {
-		p, err := wowpath.Resolve(cfg.WoWPath)
-		if err == nil {
+	if active.WoWPath != "" {
+		if p, err := wowpath.Resolve(active.WoWPath); err == nil {
 			path = p
 		}
 	}
 	if path == "" {
-		p, err := wowpath.Resolve("")
-		if err == nil {
+		// Fall back to auto-detection only when the profile has
+		// no stored path (shouldn't normally happen post-T1, but
+		// keeps the bootstrap robust for hand-edited configs).
+		if p, err := wowpath.Resolve(""); err == nil {
 			path = p
 		}
 	}
-
-	// Persist the resolved path so it survives restarts.
-	// This covers auto-detection: the config may have an empty
-	// WoWPath that was saved before the user configured one.
-	if path != "" && cfg.WoWPath == "" {
-		cfg.WoWPath = string(path)
+	if path != "" && active.WoWPath == "" {
+		active.WoWPath = string(path)
 	}
 
 	// Remove addons that no longer exist on disk (user deleted
-	// them manually outside the TUI).
-		if path != "" {
-		pruneMissingAddons(cfg, string(path))
-		scanExistingRepos(cfg, string(path))
-		scanGitClones(cfg, string(path))
+	// them manually outside the TUI) and re-discover any that
+	// are on-disk but not tracked. Both are scoped to the active
+	// profile's path.
+	if path != "" {
+		pruneMissingAddons(active, string(path))
+		scanExistingRepos(active, string(path))
+		scanGitClones(active, string(path))
 	}
 
 	model := ui.NewModel()
 	model.Config = cfg
-	model.WowPath = path
+	model.SetActiveProfile(active)
 	model.Screen = model.StartScreen()
 
 	// Check for self-updates on startup (non-blocking).
@@ -109,9 +143,13 @@ func run() error {
 
 // pruneMissingAddons removes tracked addons whose folders no
 // longer exist on disk (neither the addon dir nor the repo dir).
-func pruneMissingAddons(cfg *config.Config, addonsRoot string) {
-	filtered := cfg.Addons[:0]
-	for _, a := range cfg.Addons {
+// Operates on a single profile's addon list.
+func pruneMissingAddons(p *config.Profile, addonsRoot string) {
+	if p == nil {
+		return
+	}
+	filtered := p.Addons[:0]
+	for _, a := range p.Addons {
 		addonDir := filepath.Join(addonsRoot, a.Name)
 		newRepoDir := filepath.Join(addonsRoot, ".lazyaddons", a.Name)
 		oldRepoDir := filepath.Join(addonsRoot, a.Name+".repo")
@@ -122,13 +160,17 @@ func pruneMissingAddons(cfg *config.Config, addonsRoot string) {
 			filtered = append(filtered, a)
 		}
 	}
-	cfg.Addons = filtered
+	p.Addons = filtered
 }
 
 // scanExistingRepos detects addons that were previously managed
-// by the tool but aren't yet in the config. It checks both the
-// legacy <name>.repo pattern and the new .lazyaddons/<name> dir.
-func scanExistingRepos(cfg *config.Config, addonsRoot string) {
+// by the tool but aren't yet in the profile's tracked list. It
+// checks both the legacy <name>.repo pattern and the new
+// .lazyaddons/<name> dir.
+func scanExistingRepos(p *config.Profile, addonsRoot string) {
+	if p == nil {
+		return
+	}
 	// Scan legacy .repo dirs at AddOns root.
 	entries, err := os.ReadDir(addonsRoot)
 	if err == nil {
@@ -137,7 +179,7 @@ func scanExistingRepos(cfg *config.Config, addonsRoot string) {
 				continue
 			}
 			name := strings.TrimSuffix(e.Name(), ".repo")
-			if cfg.AddonByName(name) != nil {
+			if p.AddonByName(name) != nil {
 				continue
 			}
 			addonDir := filepath.Join(addonsRoot, name)
@@ -149,12 +191,12 @@ func scanExistingRepos(cfg *config.Config, addonsRoot string) {
 			if url == "" {
 				continue
 			}
-		cfg.Addons = append(cfg.Addons, config.Addon{
-			Name:        name,
-			URL:         url,
-			TrackMode:   "branch",
-			TrackTarget: detectDefaultBranch(filepath.Join(addonsRoot, name)),
-		})
+			p.Addons = append(p.Addons, config.Addon{
+				Name:        name,
+				URL:         url,
+				TrackMode:   "branch",
+				TrackTarget: detectDefaultBranch(filepath.Join(addonsRoot, name)),
+			})
 		}
 	}
 
@@ -169,7 +211,7 @@ func scanExistingRepos(cfg *config.Config, addonsRoot string) {
 			continue
 		}
 		name := e.Name()
-		if cfg.AddonByName(name) != nil {
+		if p.AddonByName(name) != nil {
 			continue
 		}
 		repoDir := filepath.Join(lazyDir, name)
@@ -182,7 +224,7 @@ func scanExistingRepos(cfg *config.Config, addonsRoot string) {
 		if _, err := os.Stat(addonDir); os.IsNotExist(err) {
 			continue
 		}
-		cfg.Addons = append(cfg.Addons, config.Addon{
+		p.Addons = append(p.Addons, config.Addon{
 			Name:        name,
 			URL:         url,
 			TrackMode:   "branch",
@@ -213,7 +255,10 @@ func detectDefaultBranch(repoDir string) string {
 
 // scanGitClones detects addons that were manually cloned with git
 // (have .git/ inside the addon folder, not .repo/).
-func scanGitClones(cfg *config.Config, addonsRoot string) {
+func scanGitClones(p *config.Profile, addonsRoot string) {
+	if p == nil {
+		return
+	}
 	entries, err := os.ReadDir(addonsRoot)
 	if err != nil {
 		return
@@ -227,7 +272,7 @@ func scanGitClones(cfg *config.Config, addonsRoot string) {
 		if strings.HasSuffix(name, ".repo") || name == ".lazyaddons" {
 			continue
 		}
-		if cfg.AddonByName(name) != nil {
+		if p.AddonByName(name) != nil {
 			continue // already tracked
 		}
 		gitDir := filepath.Join(addonsRoot, name, ".git")
@@ -244,7 +289,7 @@ func scanGitClones(cfg *config.Config, addonsRoot string) {
 		if url == "" {
 			continue
 		}
-		cfg.Addons = append(cfg.Addons, config.Addon{
+		p.Addons = append(p.Addons, config.Addon{
 			Name:        name,
 			URL:         url,
 			TrackMode:   "branch",

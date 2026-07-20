@@ -72,7 +72,7 @@ func TestScan_DetectsGitTrackedAddons(t *testing.T) {
 	seedBareWithAddon(t, addons, "Atlas")
 	seedBareWithAddon(t, addons, "Bagnon")
 
-	cfg := &config.Config{Version: 1, Addons: []config.Addon{}}
+	cfg := v2ConfigWithAddons(nil, "")
 	mgr := backup.New(addons)
 
 	// scan = enumerate subdirs with .git, capture URL/SHA
@@ -108,7 +108,7 @@ func TestScan_DetectsGitTrackedAddons(t *testing.T) {
 	if len(detected) != 2 {
 		t.Errorf("detected = %d, want 2", len(detected))
 	}
-	cfg.Addons = append(cfg.Addons, detected...)
+	cfg.Profiles[0].Addons = append(cfg.Profiles[0].Addons, detected...)
 }
 
 func TestScan_EmptyAddOnsFolder(t *testing.T) {

@@ -9,6 +9,26 @@ import (
 	"github.com/pentsec/lazyaddons/internal/config"
 )
 
+// testConfigWithAddons is a small helper used by the v2-shaped
+// tests in this file. It returns a Config with a single
+// "Retail" profile containing the supplied addons, and the
+// model has its ActiveProfile wired accordingly.
+func testConfigWithAddons(t *testing.T, addons []config.Addon) *config.Config {
+	t.Helper()
+	return &config.Config{
+		Version: config.CurrentSchemaVersion,
+		Profiles: []config.Profile{
+			{
+				ID:      "p1",
+				Name:    "Retail",
+				WoWPath: "/tmp/wow/Interface/AddOns",
+				Addons:  addons,
+			},
+		},
+		ActiveProfileID: "p1",
+	}
+}
+
 func TestNewModel_DefaultsToListScreen(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
@@ -51,14 +71,12 @@ func TestUpdate_QOnListQuits(t *testing.T) {
 func TestUpdate_DownArrowAdvancesSelection(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
-	m.Config = &config.Config{
-		Version: 1,
-		Addons: []config.Addon{
-			{Name: "Atlas"},
-			{Name: "Bagnon"},
-			{Name: "Dbm"},
-		},
-	}
+	m.Config = testConfigWithAddons(t, []config.Addon{
+		{Name: "Atlas"},
+		{Name: "Bagnon"},
+		{Name: "Dbm"},
+	})
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Selection = 0
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	mm := updated.(Model)
@@ -70,10 +88,8 @@ func TestUpdate_DownArrowAdvancesSelection(t *testing.T) {
 func TestUpdate_DownArrowClampsAtEnd(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
-	m.Config = &config.Config{
-		Version: 1,
-		Addons:  []config.Addon{{Name: "A"}, {Name: "B"}},
-	}
+	m.Config = testConfigWithAddons(t, []config.Addon{{Name: "A"}, {Name: "B"}})
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Selection = 1
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	mm := updated.(Model)
@@ -85,10 +101,8 @@ func TestUpdate_DownArrowClampsAtEnd(t *testing.T) {
 func TestUpdate_UpArrowClampsAtZero(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
-	m.Config = &config.Config{
-		Version: 1,
-		Addons:  []config.Addon{{Name: "A"}},
-	}
+	m.Config = testConfigWithAddons(t, []config.Addon{{Name: "A"}})
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Selection = 0
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	mm := updated.(Model)
@@ -150,7 +164,10 @@ func TestUpdate_AddFormEnterRejectsDuplicate(t *testing.T) {
 	m := NewModel()
 	m.Screen = screenAddForm
 	m.AddInput = "https://github.com/u/Atlas"
-	m.Config.Addons = []config.Addon{{Name: "Atlas", URL: "https://github.com/u/Atlas"}}
+	m.Config = testConfigWithAddons(t, []config.Addon{
+		{Name: "Atlas", URL: "https://github.com/u/Atlas"},
+	})
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	mm := updated.(Model)
 	if mm.AddError == "" {
@@ -231,10 +248,11 @@ func TestView_ListWithAddons(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
 	m.Width = 80
-	m.Config.Addons = []config.Addon{
+	m.Config = testConfigWithAddons(t, []config.Addon{
 		{Name: "Atlas", TrackMode: "branch", TrackTarget: "main"},
 		{Name: "Bagnon", TrackMode: "release", TrackTarget: "v1.0.0"},
-	}
+	})
+	m.SetActiveProfile(m.Config.FindProfileByID(m.Config.ActiveProfileID))
 	m.Statuses = map[string]AddonStatus{
 		"Atlas":  StatusOK,
 		"Bagnon": StatusUpdate,
@@ -258,6 +276,7 @@ func TestView_EmptyListShowsPrompt(t *testing.T) {
 	t.Parallel()
 	m := NewModel()
 	m.Width = 80
+	// No active profile, no addons.
 	view := m.View()
 	if !strings.Contains(view, "Press a to add") {
 		t.Errorf("empty list view missing prompt: %q", view)

@@ -89,16 +89,16 @@ func TestRollback_EmptyBackupError(t *testing.T) {
 
 func TestRollback_ConfigStateUpdate(t *testing.T) {
 	t.Parallel()
-	cfg := &config.Config{Version: 1, Addons: []config.Addon{
+	cfg := v2ConfigWithAddons([]config.Addon{
 		{Name: "X", URL: "u", TrackMode: "release", TrackTarget: "v1.0.0"},
-	}}
+	}, "")
 	// Simulate update: change track target to v1.1.0.
-	entry := cfg.AddonByName("X")
+	entry := cfg.Profiles[0].AddonByName("X")
 	entry.TrackTarget = "v1.1.0"
 	// Simulate rollback: revert to v1.0.0.
 	entry.TrackTarget = "v1.0.0"
-	if cfg.Addons[0].TrackTarget != "v1.0.0" {
-		t.Errorf("TrackTarget = %q, want v1.0.0 (rolled back)", cfg.Addons[0].TrackTarget)
+	if cfg.Profiles[0].Addons[0].TrackTarget != "v1.0.0" {
+		t.Errorf("TrackTarget = %q, want v1.0.0 (rolled back)", cfg.Profiles[0].Addons[0].TrackTarget)
 	}
 }
 

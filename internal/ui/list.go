@@ -95,8 +95,8 @@ func viewList(m *Model) string {
 	}
 
 	// Filter addons by search query.
-	filtered := filterAddons(m.Config.Addons, m.SearchQuery)
-	total := len(m.Config.Addons)
+	filtered := filterAddons(activeAddons(m), m.SearchQuery)
+	total := len(activeAddons(m))
 	shown := len(filtered)
 
 	if shown == 0 {
@@ -151,7 +151,7 @@ func viewList(m *Model) string {
 	for i := viewStart; i < viewEnd; i++ {
 		a := filtered[i]
 		// Find real index for selection highlighting.
-		realIdx := m.Config.AddonIndex(a.Name)
+		realIdx := activeAddonsIndex(m, a.Name)
 		marker := "  "
 		if realIdx == m.Selection {
 			marker = "> "
@@ -196,7 +196,7 @@ func viewList(m *Model) string {
 		help := fmt.Sprintf("%d/%d addons • esc clear", shown, total)
 		b.WriteString(helpStyle.Render(help))
 	} else {
-		help := fmt.Sprintf("%d addons • / search • a add • d rm • u update • q quit", total)
+		help := fmt.Sprintf("%d addons • / search • a add • d rm • u update • p profiles • q quit", total)
 		b.WriteString(helpStyle.Render(help))
 	}
 	return b.String()
@@ -215,6 +215,25 @@ func filterAddons(addons []config.Addon, query string) []config.Addon {
 		}
 	}
 	return out
+}
+
+// activeAddons returns the active profile's addons, or an empty
+// slice if no profile is active. This is the list-renderer's
+// safe view onto the per-profile addon storage.
+func activeAddons(m *Model) []config.Addon {
+	if m == nil || m.ActiveProfile == nil {
+		return nil
+	}
+	return m.ActiveProfile.Addons
+}
+
+// activeAddonsIndex returns the position of name in the active
+// profile's addons, or -1 if not found / no active profile.
+func activeAddonsIndex(m *Model, name string) int {
+	if m == nil || m.ActiveProfile == nil {
+		return -1
+	}
+	return m.ActiveProfile.AddonIndex(name)
 }
 
 func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -263,7 +282,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return *m, nil
 	case "down", "j":
-		if m.Selection < len(m.Config.Addons)-1 {
+		if m.Selection < len(activeAddons(m))-1 {
 			m.Selection++
 			m.ensureVisible(m)
 		}
@@ -282,13 +301,13 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Screen = screenConfirmRemove
 			return *m, nil
 	case "u":
-		if len(m.Config.Addons) == 0 {
+		if len(activeAddons(m)) == 0 {
 			return *m, nil
 		}
 		m.startProgress("Checking for updates...", 1, 1)
 		return *m, tea.Batch(
 			spinnerCmd(),
-			checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons),
+			checkAllUpdatesCmd(string(m.WowPath), activeAddons(m)),
 		)
 	case "enter":
 		a := m.selectedAddon()
@@ -296,13 +315,26 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return *m, nil
 		}
 		m.startProgress(fmt.Sprintf("Updating %s...", a.Name), 1, 1)
-		return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.Config))
+		return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.ActiveProfile))
 	case "U":
 		if m.UpdateBanner == nil || !m.UpdateBanner.UpdateAvailable {
 			return *m, nil
 		}
 		m.startProgress("Downloading lazyaddons update...", 1, 1)
 		return *m, tea.Batch(spinnerCmd(), selfUpdateCmd(m.UpdateBanner.LatestVersion))
+	case "p":
+		m.Screen = screenProfilePicker
+		// Reset cursor to the active profile on entry.
+		m.ProfileCursor = 0
+		if m.ActiveProfile != nil {
+			for i, p := range m.Config.Profiles {
+				if p.ID == m.ActiveProfile.ID {
+					m.ProfileCursor = i
+					break
+				}
+			}
+		}
+		return *m, nil
 	}
 	return *m, nil
 }
@@ -310,7 +342,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // ensureVisible adjusts ScrollOffset so the current Selection is
 // within the visible window. Must be called after Selection changes.
 func (m *Model) ensureVisible(_ *Model) {
-	filtered := filterAddons(m.Config.Addons, m.SearchQuery)
+	filtered := filterAddons(activeAddons(m), m.SearchQuery)
 	shown := len(filtered)
 	if shown == 0 {
 		return
@@ -330,7 +362,7 @@ func (m *Model) ensureVisible(_ *Model) {
 	// Find the position of the selected addon in the filtered list.
 	selIdx := -1
 	for i, a := range filtered {
-		if a.Name == m.Config.Addons[m.Selection].Name {
+		if a.Name == activeAddons(m)[m.Selection].Name {
 			selIdx = i
 			break
 		}
@@ -345,7 +377,7 @@ func (m *Model) ensureVisible(_ *Model) {
 		if selIdx < 0 {
 			selIdx = 0
 		}
-		m.Selection = m.Config.AddonIndex(filtered[selIdx].Name)
+		m.Selection = activeAddonsIndex(m, filtered[selIdx].Name)
 	}
 
 	// Scroll to keep selection in view.
@@ -361,7 +393,7 @@ func (m *Model) ensureVisible(_ *Model) {
 // tracked addon. It is called from the confirmation screen handler.
 func doRemove(m *Model) {
 	addonsRoot := string(m.WowPath)
-	a := m.Config.AddonByName(m.PendingRemove)
+	a := m.ActiveProfile.AddonByName(m.PendingRemove)
 	if a == nil {
 		return
 	}
@@ -376,10 +408,10 @@ func doRemove(m *Model) {
 	_ = os.RemoveAll(filepath.Join(addonsRoot, ".lazyaddons", a.Name))
 	_ = os.RemoveAll(filepath.Join(addonsRoot, a.Name+".repo"))
 
-	m.Config.RemoveAddon(a.Name)
+	m.ActiveProfile.RemoveAddon(a.Name)
 	delete(m.Statuses, a.Name)
-	if m.Selection >= len(m.Config.Addons) {
-		m.Selection = len(m.Config.Addons) - 1
+	if m.Selection >= len(activeAddons(m)) {
+		m.Selection = len(activeAddons(m)) - 1
 	}
 }
 

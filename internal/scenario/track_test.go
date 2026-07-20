@@ -43,10 +43,10 @@ func TestTrack_RejectsInvalidURL(t *testing.T) {
 
 func TestTrack_DuplicatePrevention(t *testing.T) {
 	t.Parallel()
-	cfg := &config.Config{Version: 1, Addons: []config.Addon{
+	cfg := v2ConfigWithAddons([]config.Addon{
 		{Name: "Atlas", URL: "https://github.com/u/Atlas"},
-	}}
-	if cfg.AddonByName("Atlas") == nil {
+	}, "")
+	if cfg.Profiles[0].AddonByName("Atlas") == nil {
 		t.Errorf("expected Atlas to be present")
 	}
 	// Attempting to add the same name should be detectable.
@@ -54,7 +54,7 @@ func TestTrack_DuplicatePrevention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveName: %v", err)
 	}
-	if cfg.AddonByName(dup) != nil {
+	if cfg.Profiles[0].AddonByName(dup) != nil {
 		// caller would surface a "already tracked" error
 	}
 }
@@ -95,11 +95,11 @@ func TestTrack_NoReleasesDefaultsToBranch(t *testing.T) {
 		t.Errorf("len = %d, want 0", len(releases))
 	}
 	// Caller would default to track_mode=branch, track_target=main
-	cfg := &config.Config{Version: 1, Addons: []config.Addon{
+	cfg := v2ConfigWithAddons([]config.Addon{
 		{Name: "X", URL: "https://github.com/u/x", TrackMode: "branch", TrackTarget: "main"},
-	}}
-	if cfg.Addons[0].TrackMode != "branch" {
-		t.Errorf("TrackMode = %q, want branch", cfg.Addons[0].TrackMode)
+	}, "")
+	if cfg.Profiles[0].Addons[0].TrackMode != "branch" {
+		t.Errorf("TrackMode = %q, want branch", cfg.Profiles[0].Addons[0].TrackMode)
 	}
 }
 
@@ -118,11 +118,11 @@ func TestTrack_RateLimitedFallbackToBranch(t *testing.T) {
 	}
 	// Caller falls back to branch tracking; the test asserts the
 	// addon record is still created with branch mode.
-	cfg := &config.Config{Version: 1, Addons: []config.Addon{
+	cfg := v2ConfigWithAddons([]config.Addon{
 		{Name: "X", URL: "https://github.com/u/x", TrackMode: "branch", TrackTarget: "main"},
-	}}
-	if cfg.Addons[0].TrackMode != "branch" {
-		t.Errorf("fallback TrackMode = %q, want branch", cfg.Addons[0].TrackMode)
+	}, "")
+	if cfg.Profiles[0].Addons[0].TrackMode != "branch" {
+		t.Errorf("fallback TrackMode = %q, want branch", cfg.Profiles[0].Addons[0].TrackMode)
 	}
 }
 

@@ -31,6 +31,13 @@ const (
 	screenWowBrowse
 	screenConfirmRemove
 	screenConfirmReplace
+	// Profile screens (T3+): manage the multi-profile flow.
+	// screenProfileAdd is also the first-run screen when the
+	// user has zero profiles configured.
+	screenProfilePicker
+	screenProfileAdd
+	screenProfileRename
+	screenProfileDelete
 )
 
 // String returns a stable identifier for the screen, useful for
@@ -55,6 +62,14 @@ func (s screen) String() string {
 		return "confirmRemove"
 	case screenConfirmReplace:
 		return "confirmReplace"
+	case screenProfilePicker:
+		return "profilePicker"
+	case screenProfileAdd:
+		return "profileAdd"
+	case screenProfileRename:
+		return "profileRename"
+	case screenProfileDelete:
+		return "profileDelete"
 	}
 	return "unknown"
 }
@@ -117,6 +132,13 @@ type Model struct {
 	Statuses   map[string]AddonStatus // keyed by addon.Name
 	ErrMessage string
 
+	// ActiveProfile points into Config.Profiles at the currently
+	// active profile. nil when no profile is active (e.g. fresh
+	// install). Path-consuming code (clone, update, backup, scan)
+	// should read m.ActiveProfile.WoWPath; m.WowPath is kept in
+	// sync via setActiveProfile for convenience.
+	ActiveProfile *config.Profile
+
 	// Add flow state
 	AddInput        string
 	AddReleases     []github.Release
@@ -169,6 +191,19 @@ type Model struct {
 	SearchQuery  string
 	SearchActive bool
 	ScrollOffset int
+
+	// Profile picker state
+	ProfileCursor int // index of selected profile in picker
+
+	// Profile add state. PendingProfileName carries the name the
+	// user typed on screenProfileAdd; on the path screen it is
+	// checked by confirmPath/acceptPath to know we are in
+	// "create profile" mode.
+	PendingProfileName string
+	PendingProfileID   string // id of the profile being renamed or deleted
+	PendingProfilePath string // resolved path during creation (between confirm and accept)
+	ProfileNameError   string // shown on screenProfileAdd / screenProfileRename
+	ProfileError       string // shown on screenProfileDelete for active-profile rejection etc.
 }
 
 // NewModel constructs a Model with sensible defaults. Callers
@@ -186,14 +221,25 @@ func NewModel() *Model {
 }
 
 // StartScreen returns the screen the program should show on
-// launch. If the WoW path is not configured, it starts with the
-// setup screen so the user can provide it before anything else.
+// launch. If no profiles are configured (fresh install), it
+// starts on screenProfileAdd so the user must create a profile
+// before anything else. Otherwise it lands on the addon list.
 func (m *Model) StartScreen() screen {
-	if m.WowPath == "" {
-		m.WowSearching = true
-		return screenWowPath
+	if m.Config == nil || len(m.Config.Profiles) == 0 {
+		return screenProfileAdd
 	}
 	return screenList
+}
+
+// SetActiveProfile wires the active profile pointer and syncs
+// the convenience m.WoWPath field. Callers should use this
+// rather than assigning m.ActiveProfile directly so the path
+// stays consistent.
+func (m *Model) SetActiveProfile(p *config.Profile) {
+	m.ActiveProfile = p
+	if p != nil {
+		m.WowPath = wowpath.Path(p.WoWPath)
+	}
 }
 
 func (m *Model) startProgress(label string, step, total int) {
@@ -206,13 +252,14 @@ func (m *Model) startProgress(label string, step, total int) {
 }
 
 // Init is the Bubble Tea Init function. If there are tracked
-// addons, it fires an automatic update check on startup.
+// addons in the active profile, it fires an automatic update
+// check on startup.
 func (m Model) Init() tea.Cmd {
 	if m.WowSearching {
 		return detectCandidatesCmd()
 	}
-	if len(m.Config.Addons) > 0 {
-		return checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons)
+	if m.ActiveProfile != nil && len(m.ActiveProfile.Addons) > 0 {
+		return checkAllUpdatesCmd(string(m.WowPath), m.ActiveProfile.Addons)
 	}
 	return nil
 }
@@ -296,6 +343,14 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return updateConfirmRemove(&m, key)
 	case screenConfirmReplace:
 		return updateConfirmReplace(&m, key)
+	case screenProfilePicker:
+		return updateProfilePicker(&m, key)
+	case screenProfileAdd:
+		return updateProfileAdd(&m, key)
+	case screenProfileRename:
+		return updateProfileRename(&m, key)
+	case screenProfileDelete:
+		return updateProfileDelete(&m, key)
 	}
 	return m, nil
 }
@@ -323,11 +378,19 @@ func (m Model) View() string {
 		content = viewConfirmRemove(&m)
 	case screenConfirmReplace:
 		content = viewConfirmReplace(&m)
+	case screenProfilePicker:
+		content = viewProfilePicker(&m)
+	case screenProfileAdd:
+		content = viewProfileAdd(&m)
+	case screenProfileRename:
+		content = viewProfileRename(&m)
+	case screenProfileDelete:
+		content = viewProfileDelete(&m)
 	default:
 		content = fmt.Sprintf("unknown screen %d", m.Screen)
 	}
 	w := max(m.Width-2, minInner)
-	return WrapFrame(Header(w)+"\n"+content+"\n"+Footer(w), w)
+	return WrapFrame(Header(w)+"\n"+content+"\n"+m.Footer(w), w)
 }
 
 // handleReleaseFetched processes the GitHub API response for the
@@ -355,11 +418,14 @@ func detectCandidatesCmd() tea.Cmd {
 
 // Helper: readKey is exported only to the package's test file.
 func (m *Model) selectedAddon() *config.Addon {
-	if len(m.Config.Addons) == 0 {
+	if m.ActiveProfile == nil {
 		return nil
 	}
-	if m.Selection < 0 || m.Selection >= len(m.Config.Addons) {
+	if len(m.ActiveProfile.Addons) == 0 {
 		return nil
 	}
-	return &m.Config.Addons[m.Selection]
+	if m.Selection < 0 || m.Selection >= len(m.ActiveProfile.Addons) {
+		return nil
+	}
+	return &m.ActiveProfile.Addons[m.Selection]
 }

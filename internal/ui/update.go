@@ -62,8 +62,8 @@ func checkAllUpdatesCmd(addonsRoot string, addons []config.Addon) tea.Cmd {
 }
 
 // applyAddonCmd applies the update for a single addon.
-func applyAddonCmd(addonsRoot string, a config.Addon, ghClient *gh.Client, cfg *config.Config) tea.Cmd {
-	return applyUpdatesCmd(addonsRoot, []config.Addon{a}, ghClient, cfg)
+func applyAddonCmd(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
+	return applyUpdatesCmd(addonsRoot, []config.Addon{a}, ghClient, profile)
 }
 
 // applyUpdatesCmd applies updates for each addon. Branch-tracked
@@ -71,7 +71,7 @@ func applyAddonCmd(addonsRoot string, a config.Addon, ghClient *gh.Client, cfg *
 // asset from GitHub. All addons get UnpackUpdate or UnpackReleaseZip.
 // On success for release-tracked addons, the config is updated with
 // the new version tag and saved.
-func applyUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Client, cfg *config.Config) tea.Cmd {
+func applyUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
 	return func() tea.Msg {
 		var updated []string
 		for _, a := range addons {
@@ -82,15 +82,15 @@ func applyUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Clie
 				if err := applyReleaseUpdate(addonsRoot, &a, ghClient); err != nil {
 					continue
 				}
-				// Persist the new version in config.
-				if cfg != nil {
-					for i := range cfg.Addons {
-						if cfg.Addons[i].Name == a.Name {
-							cfg.Addons[i].TrackTarget = a.TrackTarget
+				// Persist the new version in the active profile;
+				// main.go writes the whole config to disk on exit.
+				if profile != nil {
+					for i := range profile.Addons {
+						if profile.Addons[i].Name == a.Name {
+							profile.Addons[i].TrackTarget = a.TrackTarget
 							break
 						}
 					}
-					_ = config.Save(cfg)
 				}
 			} else {
 				// Branch mode: git pull + re-unpack.
@@ -113,7 +113,7 @@ func applyUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Clie
 	}
 }
 
-func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, cfg *config.Config, step, total int) tea.Cmd {
+func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile, step, total int) tea.Cmd {
 	return tea.Sequence(
 		func() tea.Msg {
 			return progressStepMsg{
@@ -129,14 +129,13 @@ func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, cfg 
 				if err := applyReleaseUpdate(addonsRoot, &a, ghClient); err != nil {
 					return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
 				}
-				if cfg != nil {
-					for i := range cfg.Addons {
-						if cfg.Addons[i].Name == a.Name {
-							cfg.Addons[i].TrackTarget = a.TrackTarget
+				if profile != nil {
+					for i := range profile.Addons {
+						if profile.Addons[i].Name == a.Name {
+							profile.Addons[i].TrackTarget = a.TrackTarget
 							break
 						}
 					}
-					_ = config.Save(cfg)
 				}
 			} else {
 				if repoDir == "" {
@@ -157,10 +156,10 @@ func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, cfg 
 	)
 }
 
-func applyUpdatesWithProgress(addonsRoot string, addons []config.Addon, ghClient *gh.Client, cfg *config.Config) tea.Cmd {
+func applyUpdatesWithProgress(addonsRoot string, addons []config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(addons))
 	for i, a := range addons {
-		cmds = append(cmds, applyOneUpdate(addonsRoot, a, ghClient, cfg, i+1, len(addons)))
+		cmds = append(cmds, applyOneUpdate(addonsRoot, a, ghClient, profile, i+1, len(addons)))
 	}
 	return tea.Sequence(cmds...)
 }
@@ -277,7 +276,7 @@ func (m *Model) refreshAddonMeta(name string) {
 	if repoDir == "" {
 		return
 	}
-	a := m.Config.AddonByName(name)
+	a := m.ActiveProfile.AddonByName(name)
 	if a == nil {
 		return
 	}
