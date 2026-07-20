@@ -3,6 +3,7 @@ package scenario
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,7 +30,7 @@ func TestInstall_CloneBranch(t *testing.T) {
 	// Clone into a folder that matches the .toc file name
 	// (MyAddon) so ValidateTOC passes.
 	dest := filepath.Join(t.TempDir(), "MyAddon")
-	if err := gitops.Clone(remote, dest, "main"); err != nil {
+	if err := gitops.Clone(context.Background(), remote, dest, "main"); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 
@@ -61,7 +62,7 @@ func TestInstall_CloneRelease(t *testing.T) {
 	runGit(t, work, "push", remote, "v1.0.0")
 
 	dest := filepath.Join(t.TempDir(), "Atlas")
-	if err := gitops.Clone(remote, dest, "main"); err != nil {
+	if err := gitops.Clone(context.Background(), remote, dest, "main"); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if err := gitops.Checkout(dest, "v1.0.0"); err != nil {

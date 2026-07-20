@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -302,7 +303,7 @@ func TestClone_ProducesWorkingRepo(t *testing.T) {
 	remote := newBareRemote(t)
 	seedRemote(t, remote)
 	dest := filepath.Join(t.TempDir(), "MyAddon")
-	if err := Clone(remote, dest, "main"); err != nil {
+	if err := Clone(context.Background(), remote, dest, "main"); err != nil {
 		t.Fatalf("Clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {
@@ -532,7 +533,7 @@ func TestClone_TagRef(t *testing.T) {
 	runGit(t, work, "push", "origin", "v3.0.6")
 
 	dest := filepath.Join(t.TempDir(), "DragonUI")
-	if err := Clone(remote, dest, "v3.0.6"); err != nil {
+	if err := Clone(context.Background(), remote, dest, "v3.0.6"); err != nil {
 		t.Fatalf("Clone by tag: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {

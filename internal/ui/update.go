@@ -113,6 +113,58 @@ func applyUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Clie
 	}
 }
 
+func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, cfg *config.Config, step, total int) tea.Cmd {
+	return tea.Sequence(
+		func() tea.Msg {
+			return progressStepMsg{
+				Label: fmt.Sprintf("Updating %s...", a.Name),
+				Step:  step,
+				Total: total,
+			}
+		},
+		func() tea.Msg {
+			repoDir := findRepoDir(addonsRoot, a.Name)
+
+			if a.TrackMode == addon.TrackModeRelease {
+				if err := applyReleaseUpdate(addonsRoot, &a, ghClient); err != nil {
+					return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+				}
+				if cfg != nil {
+					for i := range cfg.Addons {
+						if cfg.Addons[i].Name == a.Name {
+							cfg.Addons[i].TrackTarget = a.TrackTarget
+							break
+						}
+					}
+					_ = config.Save(cfg)
+				}
+			} else {
+				if repoDir == "" {
+					return updateAppliedMsg{Err: fmt.Errorf("%s: repo not found", a.Name)}
+				}
+				_ = gitops.ResetWorkingTree(repoDir)
+				_ = gitops.Fetch(repoDir)
+				if err := gitops.Pull(repoDir); err != nil {
+					if branch := gitops.DefaultBranch(repoDir); branch != "" {
+						_ = gitops.MergeFF(repoDir, "refs/remotes/origin/"+branch)
+					}
+				}
+				_ = gitops.ResetWorkingTree(repoDir)
+				addon.UnpackUpdate(addonsRoot, repoDir, a.SubModules)
+			}
+			return updateAppliedMsg{Updated: []string{a.Name}}
+		},
+	)
+}
+
+func applyUpdatesWithProgress(addonsRoot string, addons []config.Addon, ghClient *gh.Client, cfg *config.Config) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(addons))
+	for i, a := range addons {
+		cmds = append(cmds, applyOneUpdate(addonsRoot, a, ghClient, cfg, i+1, len(addons)))
+	}
+	return tea.Sequence(cmds...)
+}
+
 // applyReleaseUpdate downloads the release zip for an addon and
 // replaces the addon dirs in AddOns with the zip contents.
 func applyReleaseUpdate(addonsRoot string, a *config.Addon, ghClient *gh.Client) error {

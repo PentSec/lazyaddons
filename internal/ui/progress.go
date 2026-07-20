@@ -1,21 +1,46 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// viewProgress renders the spinner + status text used during
-// long-running operations. We use a simple ASCII spinner that
-// doesn't depend on the bubbles spinner component so the golden
-// files stay deterministic across terminals.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+type spinnerTickMsg struct{}
+
+func spinnerCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
+
+type progressStepMsg struct {
+	Label string
+	Step  int
+	Total int
+}
+
 func viewProgress(m *Model) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Working "))
 	b.WriteString("\n\n")
-	b.WriteString(progressStyle.Render("[...] "))
+
+	frame := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	elapsed := time.Since(m.progressStart).Truncate(time.Second)
+
+	b.WriteString(progressStyle.Render(frame + " "))
 	b.WriteString(m.ProgressLabel)
+	b.WriteString(dimStyle.Render(fmt.Sprintf(" (%v)", elapsed)))
+
+	if m.progressTotal > 1 {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render(fmt.Sprintf("   step %d of %d", m.progressStep, m.progressTotal)))
+	}
+
 	b.WriteString("\n\n")
 	b.WriteString(helpStyle.Render("press ctrl+c to cancel"))
 	b.WriteString("\n")
@@ -23,10 +48,8 @@ func viewProgress(m *Model) string {
 }
 
 func updateProgress(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// The progress screen is read-only except for the global
-	// ctrl+c handler bound in the parent.
 	_ = key
-	return *m, nil
+	return *m, spinnerCmd()
 }
 
 func viewError(m *Model) string {

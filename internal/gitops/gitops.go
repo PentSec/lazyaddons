@@ -3,6 +3,7 @@
 package gitops
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -38,12 +39,15 @@ func openRepo(dir string) (*git.Repository, *git.Worktree, error) {
 // specific ref. The ref may be a branch name, a tag name, or a
 // commit SHA; it is resolved automatically against the remote.
 // An empty ref means "whatever the remote HEAD points to".
-func Clone(url, dest, ref string) error {
+func Clone(ctx context.Context, url, dest, ref string) error {
 	if url == "" {
 		return errors.New("gitops: empty url")
 	}
 	if dest == "" {
 		return errors.New("gitops: empty dest")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	opts := &git.CloneOptions{
 		URL:               url,
@@ -56,6 +60,9 @@ func Clone(url, dest, ref string) error {
 			return fmt.Errorf("gitops: clone %s: %w", url, err)
 		}
 		opts.ReferenceName = refName
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	_, err := git.PlainClone(dest, false, opts)
 	if err != nil {

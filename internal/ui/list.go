@@ -285,24 +285,24 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.Config.Addons) == 0 {
 			return *m, nil
 		}
-		m.Screen = screenProgress
-		m.ProgressLabel = "Checking for updates..."
-		return *m, checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons)
+		m.startProgress("Checking for updates...", 1, 1)
+		return *m, tea.Batch(
+			spinnerCmd(),
+			checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons),
+		)
 	case "enter":
 		a := m.selectedAddon()
 		if a == nil || m.Statuses[a.Name] != StatusUpdate {
 			return *m, nil
 		}
-		m.Screen = screenProgress
-		m.ProgressLabel = fmt.Sprintf("Updating %s...", a.Name)
-		return *m, applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.Config)
+		m.startProgress(fmt.Sprintf("Updating %s...", a.Name), 1, 1)
+		return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.Config))
 	case "U":
 		if m.UpdateBanner == nil || !m.UpdateBanner.UpdateAvailable {
 			return *m, nil
 		}
-		m.Screen = screenProgress
-		m.ProgressLabel = "Downloading lazyaddons update..."
-		return *m, selfUpdateCmd(m.UpdateBanner.LatestVersion)
+		m.startProgress("Downloading lazyaddons update...", 1, 1)
+		return *m, tea.Batch(spinnerCmd(), selfUpdateCmd(m.UpdateBanner.LatestVersion))
 	}
 	return *m, nil
 }

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ type releaseFetchedMsg struct {
 // real branch name (not a hardcoded "main") in the config.
 func cloneCmd(url, destDir, branch string, a cloneDoneMsg) tea.Cmd {
 	return func() tea.Msg {
-		a.Err = gitops.Clone(url, destDir, branch)
+		a.Err = gitops.Clone(context.Background(), url, destDir, branch)
 		if a.Err == nil {
 			a.DefaultBranch = gitops.DefaultBranch(destDir)
 		}
@@ -192,15 +193,17 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 		return nil
 	}
 
-	m.Screen = screenProgress
-	m.ProgressLabel = fmt.Sprintf("Cloning %s (%s:%s)...", name, mode, target)
+	m.startProgress(fmt.Sprintf("Cloning %s...", name), 1, 1)
 
-	return cloneCmd(url, destDir, target, cloneDoneMsg{
+	return tea.Batch(
+		spinnerCmd(),
+		cloneCmd(url, destDir, target, cloneDoneMsg{
 		Name:   name,
 		URL:    url,
 		Mode:   mode,
 		Target: target,
-	})
+	}),
+)
 }
 
 // handleCloneDone processes a finished clone operation.
@@ -297,9 +300,11 @@ func updateReleasePicker(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Screen = screenError
 			return *m, nil
 		}
-		m.Screen = screenProgress
-		m.ProgressLabel = "Fetching latest release..."
-		return *m, fetchLatestReleaseCmd(m.GitHub, owner, repo, name, m.AddInput)
+		m.startProgress("Fetching latest release...", 1, 1)
+		return *m, tea.Batch(
+			spinnerCmd(),
+			fetchLatestReleaseCmd(m.GitHub, owner, repo, name, m.AddInput),
+		)
 	}
 	return *m, nil
 }

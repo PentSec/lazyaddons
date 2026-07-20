@@ -7,6 +7,7 @@ package ui
 
 import (
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -138,6 +139,12 @@ type Model struct {
 	// Progress state
 	ProgressLabel string
 
+	// Progress animation
+	spinnerFrame  int
+	progressStart time.Time
+	progressStep  int
+	progressTotal int
+
 	// Remove confirmation state
 	PendingRemove string
 
@@ -173,6 +180,15 @@ func (m *Model) StartScreen() screen {
 	return screenList
 }
 
+func (m *Model) startProgress(label string, step, total int) {
+	m.ProgressLabel = label
+	m.progressStep = step
+	m.progressTotal = total
+	m.progressStart = time.Now()
+	m.spinnerFrame = 0
+	m.Screen = screenProgress
+}
+
 // Init is the Bubble Tea Init function. If there are tracked
 // addons, it fires an automatic update check on startup.
 func (m Model) Init() tea.Cmd {
@@ -193,6 +209,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case spinnerTickMsg:
+		if m.Screen == screenProgress {
+			m.spinnerFrame++
+			return m, spinnerCmd()
+		}
+		return m, nil
+	case progressStepMsg:
+		m.ProgressLabel = msg.Label
+		m.progressStep = msg.Step
+		m.progressTotal = msg.Total
+		return m, nil
 	case cloneDoneMsg:
 		m.handleCloneDone(msg)
 		return m, nil
