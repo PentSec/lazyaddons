@@ -138,6 +138,7 @@ type Model struct {
 	WowBrowsePath  string // current directory in browser
 	WowBrowseSel   int    // selected index in browser
 	WowBrowseError string // error message for browser
+	WowWriteWarning string // set when path is valid but not writable
 
 	// Progress state
 	ProgressLabel string

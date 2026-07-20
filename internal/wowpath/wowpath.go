@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -282,4 +283,41 @@ func dedupeCandidates(c []string) []string {
 // sometimes have spaces; Unicode is preserved.
 func cleanSegment(s string) (string, error) {
 	return safepath.Validate(s)
+}
+
+// IsWritable returns true if the process can create files in dir.
+func IsWritable(dir string) bool {
+	f, err := os.CreateTemp(dir, ".lazyaddons-writetest-*")
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(f.Name())
+	return true
+}
+
+// RelaunchAsAdmin re-executes the current binary with elevated
+// privileges. On Windows it uses runas; on Linux/macOS it tries
+// pkexec then sudo. Returns an error if no escalation method is
+// available or the user cancels.
+func RelaunchAsAdmin() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("wowpath: cannot find executable: %w", err)
+	}
+	switch runtime.GOOS {
+	case "windows":
+		// runas triggers the UAC prompt.
+		return exec.Command("runas", "/user:Administrator", exe).Start()
+	default:
+		// Linux/macOS: try pkexec first (Polkit, more GUI-friendly),
+		// then sudo as fallback.
+		if _, err := exec.LookPath("pkexec"); err == nil {
+			return exec.Command("pkexec", exe).Start()
+		}
+		if _, err := exec.LookPath("sudo"); err == nil {
+			return exec.Command("sudo", exe).Start()
+		}
+		return errors.New("wowpath: no admin escalation tool found (pkexec or sudo)")
+	}
 }
