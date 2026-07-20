@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/pentsec/lazyaddons/internal/semver"
 )
 
 func TestIsGitHubHost(t *testing.T) {
@@ -252,30 +254,30 @@ func TestDownloadAsset_RateLimited(t *testing.T) {
 
 func TestParseSemver_HandlesVPrefix(t *testing.T) {
 	t.Parallel()
-	v, ok := parseSemver("v1.2.3")
+	v, ok := semver.ParseStrict("v1.2.3")
 	if !ok {
-		t.Fatal("parseSemver(v1.2.3) = !ok")
+		t.Fatal("ParseStrict(v1.2.3) = !ok")
 	}
-	if v.major != 1 || v.minor != 2 || v.patch != 3 {
-		t.Errorf("parseSemver = %+v, want {1,2,3}", v)
+	if v.Major != 1 || v.Minor != 2 || v.Patch != 3 {
+		t.Errorf("ParseStrict = %+v, want {1,2,3}", v)
 	}
 }
 
 func TestParseSemver_HandlesNoVPrefix(t *testing.T) {
 	t.Parallel()
-	v, ok := parseSemver("2.0.1")
+	v, ok := semver.ParseStrict("2.0.1")
 	if !ok {
-		t.Fatal("parseSemver(2.0.1) = !ok")
+		t.Fatal("ParseStrict(2.0.1) = !ok")
 	}
-	if v.major != 2 {
-		t.Errorf("major = %d, want 2", v.major)
+	if v.Major != 2 {
+		t.Errorf("Major = %d, want 2", v.Major)
 	}
 }
 
 func TestParseSemver_RejectsMalformed(t *testing.T) {
 	t.Parallel()
-	_, ok := parseSemver("not-a-version")
+	_, ok := semver.ParseStrict("not-a-version")
 	if ok {
-		t.Errorf("parseSemver(not-a-version) = ok, want !ok")
+		t.Errorf("ParseStrict(not-a-version) = ok, want !ok")
 	}
 }

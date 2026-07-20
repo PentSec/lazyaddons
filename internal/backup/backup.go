@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pentsec/lazyaddons/internal/safepath"
 )
 
 // BackupDirName is the name of the sibling folder under AddOns that
@@ -233,15 +235,6 @@ func containsTOC(dir string) (bool, error) {
 // The check is shared by AddonDir and BackupDir so both share the
 // same trust boundary.
 func validateName(name string) error {
-	if name == "" {
-		return errors.New("backup: empty addon name")
-	}
-	if strings.ContainsRune(name, 0) {
-		return errors.New("backup: null byte in addon name")
-	}
-	cleaned := filepath.Clean(name)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return errors.New("backup: path traversal in addon name")
-	}
-	return nil
+	_, err := safepath.Validate(name)
+	return err
 }

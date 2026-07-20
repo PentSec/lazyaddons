@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/pentsec/lazyaddons/internal/semver"
 )
 
 // APIBase is the GitHub REST base URL. Exported so tests can
@@ -255,53 +257,20 @@ func (c *Client) DownloadAsset(assetURL string, dest io.Writer) (int64, error) {
 // to lexicographic order so the list is still deterministic.
 func sortReleasesBySemver(rs []Release) {
 	sort.SliceStable(rs, func(i, j int) bool {
-		ai, aok := parseSemver(rs[i].TagName)
-		bj, bok := parseSemver(rs[j].TagName)
+		ai, aok := semver.ParseStrict(rs[i].TagName)
+		bj, bok := semver.ParseStrict(rs[j].TagName)
 		if aok && bok {
-			if ai.major != bj.major {
-				return ai.major > bj.major
+			if ai.Major != bj.Major {
+				return ai.Major > bj.Major
 			}
-			if ai.minor != bj.minor {
-				return ai.minor > bj.minor
+			if ai.Minor != bj.Minor {
+				return ai.Minor > bj.Minor
 			}
-			if ai.patch != bj.patch {
-				return ai.patch > bj.patch
+			if ai.Patch != bj.Patch {
+				return ai.Patch > bj.Patch
 			}
 			return rs[i].TagName > rs[j].TagName
 		}
 		return rs[i].TagName > rs[j].TagName
 	})
-}
-
-type semver struct {
-	major, minor, patch int
-}
-
-// parseSemver extracts major.minor.patch from a tag. The leading
-// "v" is optional. Returns ok=false if the tag does not match the
-// expected shape.
-func parseSemver(tag string) (semver, bool) {
-	t := strings.TrimPrefix(tag, "v")
-	parts := strings.SplitN(t, ".", 3)
-	if len(parts) != 3 {
-		return semver{}, false
-	}
-	major, ok1 := atoi(parts[0])
-	minor, ok2 := atoi(parts[1])
-	patch, ok3 := atoi(parts[2])
-	if !ok1 || !ok2 || !ok3 {
-		return semver{}, false
-	}
-	return semver{major, minor, patch}, true
-}
-
-func atoi(s string) (int, bool) {
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, false
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n, true
 }

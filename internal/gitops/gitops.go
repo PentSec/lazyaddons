@@ -9,13 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/storage/memory"
+
+	"github.com/pentsec/lazyaddons/internal/semver"
+
+	"github.com/pentsec/lazyaddons/internal/safepath"
 )
 
 // openRepo opens an existing git repository at dir.
@@ -239,7 +242,7 @@ func defaultBranchFromPackedRefs(dir string) string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || line[0] == '#' {
 			continue
@@ -446,13 +449,13 @@ func LatestNewTag(dir, currentTag string) (string, error) {
 		segments [3]int
 	}
 	var tags []tagInfo
-	cur := parseSemver(currentTag)
+	cur, _ := semver.Parse(currentTag)
 
 	iter.ForEach(func(ref *plumbing.Reference) error {
 		name := strings.TrimPrefix(string(ref.Name()), "refs/tags/")
-		seg := parseSemver(name)
+		seg, _ := semver.Parse(name)
 		// Only include tags that are strictly newer than current.
-		if compareSemver(seg, cur) > 0 {
+		if semver.Compare(seg, cur) > 0 {
 			tags = append(tags, tagInfo{name: name, segments: seg})
 		}
 		return nil
@@ -461,7 +464,7 @@ func LatestNewTag(dir, currentTag string) (string, error) {
 		return "", nil
 	}
 	sort.Slice(tags, func(i, j int) bool {
-		return compareSemver(tags[i].segments, tags[j].segments) > 0
+		return semver.Compare(tags[i].segments, tags[j].segments) > 0
 	})
 	return tags[0].name, nil
 }
@@ -501,40 +504,8 @@ func CheckoutTag(dir, tag string) error {
 	return nil
 }
 
-// parseSemver extracts up to 3 numeric segments from a tag string.
-// Strips a leading 'v' or 'V'. Non-numeric segments are treated as 0.
-func parseSemver(s string) [3]int {
-	s = strings.TrimLeft(s, "vV")
-	parts := strings.SplitN(s, ".", 4)
-	var seg [3]int
-	for i := 0; i < 3 && i < len(parts); i++ {
-		seg[i], _ = strconv.Atoi(parts[i])
-	}
-	return seg
-}
-
-// compareSemver returns >0 if a is newer, <0 if b is newer, 0 if equal.
-func compareSemver(a, b [3]int) int {
-	for i := 0; i < 3; i++ {
-		if a[i] != b[i] {
-			return a[i] - b[i]
-		}
-	}
-	return 0
-}
-
 // SanitizeSegment strips path-traversal attempts and null bytes
 // from a user-supplied segment.
 func SanitizeSegment(s string) (string, error) {
-	if s == "" {
-		return "", errors.New("gitops: empty segment")
-	}
-	if strings.ContainsRune(s, 0) {
-		return "", errors.New("gitops: null byte in segment")
-	}
-	cleaned := filepath.Clean(s)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return "", errors.New("gitops: path traversal detected")
-	}
-	return cleaned, nil
+	return safepath.Validate(s)
 }

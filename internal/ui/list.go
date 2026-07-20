@@ -74,10 +74,7 @@ func viewList(m *Model) string {
 	if m.Height == 0 {
 		m.Height = 24
 	}
-	inner := m.Width - 2 // border characters
-	if inner < minInner {
-		inner = minInner
-	}
+	inner := max(m.Width-2, minInner)
 	cols := computeCols(inner)
 
 	var b strings.Builder

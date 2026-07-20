@@ -269,10 +269,7 @@ func (m Model) View() string {
 	default:
 		content = fmt.Sprintf("unknown screen %d", m.Screen)
 	}
-	w := m.Width - 2
-	if w < minInner {
-		w = minInner
-	}
+	w := max(m.Width-2, minInner)
 	return WrapFrame(Header(w)+"\n"+content+"\n"+Footer(w), w)
 }
 

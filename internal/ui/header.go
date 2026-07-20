@@ -20,9 +20,7 @@ const minInner = 56
 // Header returns the lazyaddons ASCII-art logo with ANSI colors,
 // padded to the given content width (inner width of the border).
 func Header(width int) string {
-	if width < minInner {
-		width = minInner
-	}
+	width = max(width, minInner)
 	text := lipgloss.NewStyle().Foreground(colorText).Bold(true)
 
 	r1 := pad(" "+
@@ -131,9 +129,7 @@ func Footer(width int) string {
 // used by the header. Every line is padded to width and flanked by
 // ║ on both sides, with a top ╔═══╗ and bottom ╚═══╝.
 func WrapFrame(content string, width int) string {
-	if width < minInner {
-		width = minInner
-	}
+	width = max(width, minInner)
 	border := lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
 	sep := border.Render("║")
 	top := border.Render("╔" + repeat("═", width) + "╗")
@@ -151,13 +147,7 @@ func WrapFrame(content string, width int) string {
 
 // splitLines breaks a string into lines, preserving empty lines.
 func splitLines(s string) []string {
-	var lines []string
-	for _, l := range []byte(s) {
-		_ = l
-	}
-	// Use strings.Split to handle \n properly.
-	lines = splitByNewline(s)
-	return lines
+	return splitByNewline(s)
 }
 
 func splitByNewline(s string) []string {

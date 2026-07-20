@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pentsec/lazyaddons/internal/safepath"
 )
 
 // ErrNoWoWPath is returned when no WoW installation can be discovered or
@@ -160,15 +162,5 @@ func autoDetect() (Path, error) {
 // user-supplied segment. Whitespace is allowed because WoW addons
 // sometimes have spaces; Unicode is preserved.
 func cleanSegment(s string) (string, error) {
-	if s == "" {
-		return "", errors.New("empty segment")
-	}
-	if strings.ContainsRune(s, 0) {
-		return "", errors.New("null byte in segment")
-	}
-	cleaned := filepath.Clean(s)
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
-		return "", errors.New("path traversal detected")
-	}
-	return cleaned, nil
+	return safepath.Validate(s)
 }
