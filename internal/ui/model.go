@@ -132,6 +132,9 @@ type Model struct {
 	// WoW path setup state
 	WowPathInput string
 	WowPathError string
+	WowCandidates []string // auto-detected candidates
+	WowCandSel    int      // selected candidate index (-1 = none)
+	WowSearching  bool     // true while detection is running
 	WowBrowsePath  string // current directory in browser
 	WowBrowseSel   int    // selected index in browser
 	WowBrowseError string // error message for browser
@@ -167,6 +170,7 @@ func NewModel() *Model {
 		GitHub:        github.New(),
 		Statuses:      map[string]AddonStatus{},
 		WowBrowsePath: "/",
+		WowCandSel:    -1,
 	}
 }
 
@@ -175,6 +179,7 @@ func NewModel() *Model {
 // setup screen so the user can provide it before anything else.
 func (m *Model) StartScreen() screen {
 	if m.WowPath == "" {
+		m.WowSearching = true
 		return screenWowPath
 	}
 	return screenList
@@ -192,6 +197,9 @@ func (m *Model) startProgress(label string, step, total int) {
 // Init is the Bubble Tea Init function. If there are tracked
 // addons, it fires an automatic update check on startup.
 func (m Model) Init() tea.Cmd {
+	if m.WowSearching {
+		return detectCandidatesCmd()
+	}
 	if len(m.Config.Addons) > 0 {
 		return checkAllUpdatesCmd(string(m.WowPath), m.Config.Addons)
 	}
@@ -222,6 +230,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case cloneDoneMsg:
 		m.handleCloneDone(msg)
+		return m, nil
+	case wowCandidatesMsg:
+		m.WowCandidates = msg.Candidates
+		m.WowSearching = false
+		if len(m.WowCandidates) > 0 {
+			m.WowCandSel = 0
+		}
 		return m, nil
 	case releaseFetchedMsg:
 		cmd := m.handleReleaseFetched(msg)
@@ -310,6 +325,17 @@ func (m *Model) handleReleaseFetched(msg releaseFetchedMsg) tea.Cmd {
 		return nil
 	}
 	return m.startClone(msg.Name, msg.URL, addon.TrackModeRelease, msg.TagName)
+}
+
+// wowCandidatesMsg is sent when auto-detection finishes.
+type wowCandidatesMsg struct {
+	Candidates []string
+}
+
+func detectCandidatesCmd() tea.Cmd {
+	return func() tea.Msg {
+		return wowCandidatesMsg{Candidates: wowpath.DetectCandidates()}
+	}
 }
 
 // Helper: readKey is exported only to the package's test file.

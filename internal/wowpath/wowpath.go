@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/pentsec/lazyaddons/internal/safepath"
@@ -133,29 +134,147 @@ func Resolve(wowRoot string) (Path, error) {
 	return p, nil
 }
 
-// autoDetect scans the user's home directory for a Wine/Proton
-// WoW prefix. The probe is deliberately conservative — it only
-// looks for an Interface/AddOns folder under known prefixes.
+// autoDetect delegates to DetectCandidates and returns the first
+// match, preserving backward compatibility for callers that only
+// need a single path.
 func autoDetect() (Path, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("wowpath: cannot resolve home dir: %w", err)
-	}
-
-	candidates := []string{
-		filepath.Join(home, ".wine", "drive_c", "Program Files (x86)", "World of Warcraft"),
-		filepath.Join(home, ".wine", "drive_c", "Program Files", "World of Warcraft"),
-		filepath.Join(home, ".steam", "steam", "steamapps", "common", "World of Warcraft"),
-	}
-
-	for _, root := range candidates {
-		p, err := Resolve(root)
+	candidates := DetectCandidates()
+	for _, cand := range candidates {
+		p, err := Resolve(cand)
 		if err == nil {
 			return p, nil
 		}
 	}
-
 	return "", fmt.Errorf("%w: no auto-detected WoW install", ErrNoWoWPath)
+}
+
+// DetectCandidates searches common locations for WoW Interface/AddOns
+// folders. Returns all valid candidates (may be empty).
+func DetectCandidates() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+
+	var candidates []string
+
+	winePrefixes := []string{
+		filepath.Join(home, ".wine"),
+		filepath.Join(home, ".local", "share", "wineprefixes"),
+	}
+	for _, prefix := range winePrefixes {
+		candidates = append(candidates, findAddOnsInWinePrefix(prefix)...)
+	}
+
+	steamRoot := filepath.Join(home, ".local", "share", "Steam", "steamapps", "compatdata")
+	candidates = append(candidates, findAddOnsInSteam(steamRoot)...)
+
+	lutrisRoot := filepath.Join(home, "Games")
+	candidates = append(candidates, findAddOnsInDir(lutrisRoot)...)
+
+	bottlesRoot := filepath.Join(home, ".var", "app", "com.usebottles.bottles", "data", "bottles")
+	candidates = append(candidates, findAddOnsInDir(bottlesRoot)...)
+
+	directCandidates := []string{
+		filepath.Join(home, ".wine", "drive_c", "Program Files (x86)", "World of Warcraft"),
+		filepath.Join(home, ".wine", "drive_c", "Program Files", "World of Warcraft"),
+	}
+	for _, root := range directCandidates {
+		p, err := Resolve(root)
+		if err == nil {
+			candidates = append(candidates, string(p))
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		for _, drive := range []string{"C:", "D:", "E:"} {
+			candidates = append(candidates, findAddOnsInDir(filepath.Join(drive+"\\", "Games"))...)
+			candidates = append(candidates, findAddOnsInDir(filepath.Join(drive+"\\", "Program Files"))...)
+			candidates = append(candidates, findAddOnsInDir(filepath.Join(drive+"\\", "Program Files (x86)"))...)
+		}
+	}
+
+	return dedupeCandidates(candidates)
+}
+
+// findAddOnsInWinePrefix looks for WoW inside a Wine prefix structure.
+func findAddOnsInWinePrefix(prefix string) []string {
+	return findAddOnsInDir(filepath.Join(prefix, "drive_c"))
+}
+
+// findAddOnsInSteam looks for WoW inside Steam Proton compatdata prefixes.
+func findAddOnsInSteam(steamCompat string) []string {
+	entries, err := os.ReadDir(steamCompat)
+	if err != nil {
+		return nil
+	}
+	var candidates []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pfxPath := filepath.Join(steamCompat, e.Name(), "pfx", "drive_c")
+		candidates = append(candidates, findAddOnsInDir(pfxPath)...)
+	}
+	return candidates
+}
+
+// findAddOnsInDir walks dir (max 4 levels deep) looking for
+// Interface/AddOns subdirectories. Returns absolute paths to found
+// AddOns folders.
+func findAddOnsInDir(root string) []string {
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	var found []string
+	depth := 0
+	var walk func(string)
+	walk = func(dir string) {
+		if depth > 4 || len(found) >= 5 {
+			return
+		}
+		depth++
+		defer func() { depth-- }()
+
+		addonsPath := filepath.Join(dir, "Interface", "AddOns")
+		if st, err := os.Stat(addonsPath); err == nil && st.IsDir() {
+			found = append(found, addonsPath)
+			return
+		}
+		if strings.EqualFold(filepath.Base(dir), "AddOns") || strings.EqualFold(filepath.Base(dir), "addons") {
+			if st, err := os.Stat(dir); err == nil && st.IsDir() {
+				found = append(found, dir)
+				return
+			}
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			walk(filepath.Join(dir, e.Name()))
+		}
+	}
+	walk(root)
+	return found
+}
+
+func dedupeCandidates(c []string) []string {
+	seen := make(map[string]bool)
+	out := c[:0]
+	for _, s := range c {
+		cleaned := filepath.Clean(s)
+		if !seen[cleaned] {
+			seen[cleaned] = true
+			out = append(out, cleaned)
+		}
+	}
+	return out
 }
 
 // cleanSegment rejects path-traversal attempts and null bytes from a

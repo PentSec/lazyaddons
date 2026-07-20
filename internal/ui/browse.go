@@ -23,6 +23,14 @@ func viewWowBrowse(m *Model) string {
 	b.WriteString(titleStyle.Render(" Browse WoW folder "))
 	b.WriteString("\n\n")
 
+	// Breadcrumbs
+	parts := strings.Split(filepath.Clean(m.WowBrowsePath), string(filepath.Separator))
+	if len(parts) > 4 {
+		parts = parts[len(parts)-4:]
+	}
+	b.WriteString(dimStyle.Render("🏠 /" + strings.Join(parts, " / ")))
+	b.WriteString("\n\n")
+
 	dirs, err := listDirs(m.WowBrowsePath)
 	if err != nil {
 		b.WriteString(errorStyle.Render("Cannot read: " + err.Error()))
@@ -41,8 +49,11 @@ func viewWowBrowse(m *Model) string {
 			marker = "> "
 		}
 		name := d.Name
-		// Add trailing slash to indicate directory.
-		entry := fmt.Sprintf("%s %s/", marker, name)
+		hint := ""
+		if isWowFolder(name) {
+			hint = dimStyle.Render("  ← WoW?")
+		}
+		entry := fmt.Sprintf("%s %s/%s", marker, name, hint)
 		if i == m.WowBrowseSel {
 			b.WriteString(selectedStyle.Render(entry))
 		} else {
@@ -51,8 +62,6 @@ func viewWowBrowse(m *Model) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("Current: " + m.WowBrowsePath))
 	b.WriteString("\n")
 	if m.WowBrowseError != "" {
 		b.WriteString(errorStyle.Render("Error: " + m.WowBrowseError))
@@ -134,4 +143,15 @@ func listDirs(path string) ([]browseEntry, error) {
 		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
 	})
 	return dirs, nil
+}
+
+// isWowFolder returns true if the folder name suggests it's WoW-related.
+func isWowFolder(name string) bool {
+	lower := strings.ToLower(name)
+	for _, kw := range []string{"wow", "world of warcraft", "interface", "addons", "addon", "warcraft", "blizzard"} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
