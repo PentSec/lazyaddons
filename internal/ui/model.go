@@ -30,6 +30,7 @@ const (
 	screenWowPath
 	screenWowBrowse
 	screenConfirmRemove
+	screenConfirmReplace
 )
 
 // String returns a stable identifier for the screen, useful for
@@ -52,6 +53,8 @@ func (s screen) String() string {
 		return "wowBrowse"
 	case screenConfirmRemove:
 		return "confirmRemove"
+	case screenConfirmReplace:
+		return "confirmReplace"
 	}
 	return "unknown"
 }
@@ -151,6 +154,13 @@ type Model struct {
 
 	// Remove confirmation state
 	PendingRemove string
+
+	// Replace folder confirmation state
+	ReplaceFolder   string
+	ReplaceName     string
+	ReplaceURL      string
+	ReplaceMode     string
+	ReplaceTarget   string
 
 	// Self-update state
 	UpdateBanner *update.CheckResult
@@ -284,6 +294,8 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return updateWowBrowse(&m, key)
 	case screenConfirmRemove:
 		return updateConfirmRemove(&m, key)
+	case screenConfirmReplace:
+		return updateConfirmReplace(&m, key)
 	}
 	return m, nil
 }
@@ -309,6 +321,8 @@ func (m Model) View() string {
 		content = viewWowBrowse(&m)
 	case screenConfirmRemove:
 		content = viewConfirmRemove(&m)
+	case screenConfirmReplace:
+		content = viewConfirmReplace(&m)
 	default:
 		content = fmt.Sprintf("unknown screen %d", m.Screen)
 	}

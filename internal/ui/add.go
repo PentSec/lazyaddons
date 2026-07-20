@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pentsec/lazyaddons/internal/addon"
+	"github.com/pentsec/lazyaddons/internal/backup"
 	"github.com/pentsec/lazyaddons/internal/config"
 	gh "github.com/pentsec/lazyaddons/internal/github"
 	"github.com/pentsec/lazyaddons/internal/gitops"
@@ -183,13 +184,14 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 			return nil
 		}
 	}
-	// Folder exists but is NOT a git repo — don't overwrite.
+	// Folder exists but is NOT a git repo — offer to back up and replace.
 	if st, err := os.Stat(destDir); err == nil && st.IsDir() {
-		m.ErrMessage = fmt.Sprintf(
-			"Folder %s already exists and is not a git repository.\nRemove it first or add a different addon.",
-			destDir,
-		)
-		m.Screen = screenError
+		m.ReplaceFolder = destDir
+		m.ReplaceName = name
+		m.ReplaceURL = url
+		m.ReplaceMode = mode
+		m.ReplaceTarget = target
+		m.Screen = screenConfirmReplace
 		return nil
 	}
 
@@ -331,4 +333,74 @@ func defaultTrackTarget(target, detected string) string {
 		return detected
 	}
 	return "main"
+}
+
+// viewConfirmReplace renders the "folder exists — back up and replace?" prompt.
+func viewConfirmReplace(m *Model) string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(" Folder already exists "))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf(
+		"%s already exists in AddOns\nbut is not tracked by lazyaddons.",
+		m.ReplaceName,
+	))
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("> Replace"))
+	b.WriteString(" — back up existing folder to .backup/, then clone fresh\n")
+	b.WriteString("  ")
+	b.WriteString(dimStyle.Render("Cancel"))
+	b.WriteString("\n\n")
+	b.WriteString(helpStyle.Render("enter replace • esc cancel"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// updateConfirmReplace handles key presses on the replace-confirmation screen.
+func updateConfirmReplace(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "enter":
+		return doReplace(m)
+	case "esc":
+		m.ReplaceFolder = ""
+		m.Screen = screenList
+		return *m, nil
+	}
+	return *m, nil
+}
+
+// doReplace backs up the existing addon folder, then proceeds with clone.
+func doReplace(m *Model) (tea.Model, tea.Cmd) {
+	destDir := m.ReplaceFolder
+	name := m.ReplaceName
+	url := m.ReplaceURL
+	mode := m.ReplaceMode
+	target := m.ReplaceTarget
+	m.ReplaceFolder = ""
+
+	// Back up the existing folder before cloning.
+	bk := backup.New(string(m.WowPath))
+	if err := bk.Create(name); err != nil {
+		m.ErrMessage = fmt.Sprintf("Failed to back up %s: %v", name, err)
+		m.Screen = screenError
+		return *m, nil
+	}
+
+	// Remove the old folder so clone can create it fresh.
+	if err := os.RemoveAll(destDir); err != nil {
+		m.ErrMessage = fmt.Sprintf("Failed to remove old %s: %v", name, err)
+		m.Screen = screenError
+		return *m, nil
+	}
+
+	// Proceed with clone using the normal flow.
+	m.startProgress(fmt.Sprintf("Cloning %s...", name), 1, 1)
+	return *m, tea.Batch(
+		spinnerCmd(),
+		cloneCmd(url, destDir, target, cloneDoneMsg{
+			Name:   name,
+			URL:    url,
+			Mode:   mode,
+			Target: target,
+		}),
+	)
 }
