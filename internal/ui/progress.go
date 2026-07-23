@@ -56,7 +56,14 @@ func viewError(m *Model) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Error "))
 	b.WriteString("\n\n")
-	b.WriteString(errorStyle.Render(m.ErrMessage))
+	msg := m.ErrMessage
+	if idx := strings.Index(msg, "\n"); idx > 0 {
+		msg = msg[:idx]
+	}
+	if len(msg) > 120 {
+		msg = msg[:120] + "..."
+	}
+	b.WriteString(errorStyle.Render(msg))
 	b.WriteString("\n\n")
 	b.WriteString(helpStyle.Render("press any key to return"))
 	b.WriteString("\n")
