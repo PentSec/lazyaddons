@@ -304,6 +304,11 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(activeAddons(m)) == 0 {
 			return *m, nil
 		}
+		a := m.selectedAddon()
+		if a != nil && m.Statuses[a.Name] == StatusUpdate {
+			m.startProgress(fmt.Sprintf("Updating %s...", a.Name), 1, 1)
+			return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.ActiveProfile))
+		}
 		m.startProgress("Checking for updates...", 1, 1)
 		return *m, tea.Batch(
 			spinnerCmd(),
