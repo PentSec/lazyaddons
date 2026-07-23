@@ -183,6 +183,7 @@ type Model struct {
 	ReplaceURL      string
 	ReplaceMode     string
 	ReplaceTarget   string
+	ReplaceSel      int // 0 = keep existing, 1 = replace
 
 	// Self-update state
 	UpdateBanner *update.CheckResult

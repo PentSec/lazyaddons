@@ -184,13 +184,14 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 			return nil
 		}
 	}
-	// Folder exists but is NOT a git repo — offer to back up and replace.
+	// Folder exists but is NOT a git repo — let user choose.
 	if st, err := os.Stat(destDir); err == nil && st.IsDir() {
 		m.ReplaceFolder = destDir
 		m.ReplaceName = name
 		m.ReplaceURL = url
 		m.ReplaceMode = mode
 		m.ReplaceTarget = target
+		m.ReplaceSel = 0
 		m.Screen = screenConfirmReplace
 		return nil
 	}
@@ -212,7 +213,11 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 func (m *Model) handleCloneDone(msg cloneDoneMsg) {
 	m.ProgressLabel = ""
 	if msg.Err != nil {
-		m.ErrMessage = fmt.Sprintf("Clone failed for %s: %v", msg.Name, msg.Err)
+		errMsg := msg.Err.Error()
+		if len(errMsg) > 200 {
+			errMsg = "Remote returned non-git response (check the URL)"
+		}
+		m.ErrMessage = fmt.Sprintf("Clone failed for %s: %s", msg.Name, errMsg)
 		m.Screen = screenError
 		return
 	}
@@ -335,7 +340,7 @@ func defaultTrackTarget(target, detected string) string {
 	return "main"
 }
 
-// viewConfirmReplace renders the "folder exists — back up and replace?" prompt.
+// viewConfirmReplace renders the "folder exists — keep or replace?" prompt.
 func viewConfirmReplace(m *Model) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Folder already exists "))
@@ -345,12 +350,27 @@ func viewConfirmReplace(m *Model) string {
 		m.ReplaceName,
 	))
 	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("> Replace"))
-	b.WriteString(" — back up existing folder to .backup/, then clone fresh\n")
-	b.WriteString("  ")
-	b.WriteString(dimStyle.Render("Cancel"))
+
+	keepMarker := "  "
+	replaceMarker := "  "
+	keepLine := "  Keep existing — return to the list without changes"
+	replaceLine := "  Replace — back up existing folder to .backup/, then clone fresh"
+
+	if m.ReplaceSel == 0 {
+		keepMarker = "> "
+		b.WriteString(selectedStyle.Render(keepMarker + keepLine))
+	} else {
+		b.WriteString(dimStyle.Render(keepMarker + keepLine))
+	}
+	b.WriteString("\n")
+	if m.ReplaceSel == 1 {
+		replaceMarker = "> "
+		b.WriteString(selectedStyle.Render(replaceMarker + replaceLine))
+	} else {
+		b.WriteString(dimStyle.Render(replaceMarker + replaceLine))
+	}
 	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("enter replace • esc cancel"))
+	b.WriteString(helpStyle.Render("↑↓ select • enter confirm • esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -358,7 +378,16 @@ func viewConfirmReplace(m *Model) string {
 // updateConfirmReplace handles key presses on the replace-confirmation screen.
 func updateConfirmReplace(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
+	case "up", "down", "k", "j":
+		m.ReplaceSel = 1 - m.ReplaceSel // toggle 0 ↔ 1
+		return *m, nil
 	case "enter":
+		if m.ReplaceSel == 0 {
+			// Keep existing — return to list without changes.
+			m.ReplaceFolder = ""
+			m.Screen = screenList
+			return *m, nil
+		}
 		return doReplace(m)
 	case "esc":
 		m.ReplaceFolder = ""
@@ -368,7 +397,8 @@ func updateConfirmReplace(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
-// doReplace backs up the existing addon folder, then proceeds with clone.
+// doReplace backs up the existing addon folder to .backup/,
+// then proceeds with clone.
 func doReplace(m *Model) (tea.Model, tea.Cmd) {
 	destDir := m.ReplaceFolder
 	name := m.ReplaceName
