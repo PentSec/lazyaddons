@@ -21,6 +21,7 @@ Install, update, rollback — all from your terminal. Linux, macOS, and Windows.
 - **Self-update** — checks GitHub Releases on startup, one-key upgrade to latest version
 - **Cross-platform** — `filepath`-safe, handles Windows drive letters and Wine prefixes
 - **Scrollable list with search** — `/` to filter addons by name in real time
+- **Styled keybinds** — keybinds highlighted in blue for better visibility
 
 ---
 
@@ -32,15 +33,15 @@ Install, update, rollback — all from your terminal. Linux, macOS, and Windows.
 # Linux / macOS
 curl -sSL https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.sh | bash
 
-# Install to a custom prefix
+# Install to a custom prefix if required
 ./install.sh --prefix ~/.local
 
 # Install a specific version
 ./install.sh --version v1.0.0
 ```
 
+* Windows (PowerShell)
 ```powershell
-# Windows (PowerShell)
 irm https://raw.githubusercontent.com/pentsec/lazyaddons/main/install.ps1 | iex
 ```
 
@@ -62,6 +63,10 @@ go build -o lazyaddons ./cmd/lazyaddons/
 
 ```bash
 ./lazyaddons
+
+# or
+
+lazyaddons
 ```
 
 The first time, it asks for your WoW AddOns folder path. Examples:
@@ -98,6 +103,7 @@ lazyaddons --version
 | `u` | Check for addon updates (all tracked) |
 | `Enter` | Apply update (on selected addon with `↑` badge) |
 | `U` | Self-update lazyaddons (when new version available) |
+| `p` | Switch profile |
 | `q` / `Esc` | Quit / cancel |
 
 ### Status Badges
