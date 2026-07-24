@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	listOverhead      = 13 // border(2) + header(6) + col-header(1) + help(1) + footer(1) + search(2)
-	listOverheadNoSer = 11 // same minus search lines
+	listOverhead      = 14 // border(2) + header(6) + count(1) + col-header(1) + help(1) + footer(1) + search(2)
+	listOverheadNoSer = 12 // same minus search lines
 	listMinRows       = 5
 )
 
@@ -41,6 +41,23 @@ func renderBadge(s AddonStatus) string {
 		return lipgloss.NewStyle().Foreground(colorInstall).Render("⟳")
 	}
 	return " "
+}
+
+// renderHelp renders a help bar where keybinds are highlighted with keyStyle.
+// The text is split by " • " separators. Each segment's first word is treated
+// as the keybind and rendered with keyStyle; the rest uses helpStyle.
+func renderHelp(parts ...string) string {
+	sep := helpStyle.Render(" • ")
+	styled := make([]string, len(parts))
+	for i, p := range parts {
+		sp := strings.SplitN(p, " ", 2)
+		if len(sp) == 2 {
+			styled[i] = keyStyle.Render(sp[0]) + " " + helpStyle.Render(sp[1])
+		} else {
+			styled[i] = keyStyle.Render(p)
+		}
+	}
+	return strings.Join(styled, sep)
 }
 
 // colWidths computes proportional column widths for the addon list
@@ -134,6 +151,8 @@ func viewList(m *Model) string {
 	}
 
 	// Column headers.
+	b.WriteString(dimStyle.Render(fmt.Sprintf("%d addons", shown)))
+	b.WriteString("\n")
 	b.WriteString(headerStyle.Render(
 		fmt.Sprintf("%-*s %-*s %-*s %-*s  %-*s  %s",
 			cols.Name+2, "NAME",
@@ -193,11 +212,9 @@ func viewList(m *Model) string {
 	// Help bar with filter info.
 	b.WriteString("\n")
 	if m.SearchQuery != "" {
-		help := fmt.Sprintf("%d/%d addons • esc clear", shown, total)
-		b.WriteString(helpStyle.Render(help))
+		b.WriteString(renderHelp("esc clear"))
 	} else {
-		help := fmt.Sprintf("%d addons • / search • a add • d rm • u update • p profiles • q quit", total)
-		b.WriteString(helpStyle.Render(help))
+		b.WriteString(renderHelp("/ search", "a add", "d rm", "enter update", "p profiles", "q quit"))
 	}
 	return b.String()
 }
@@ -459,6 +476,7 @@ var (
 	selectedStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
 	dimStyle          = lipgloss.NewStyle().Faint(true)
 	helpStyle         = lipgloss.NewStyle().Faint(true)
+	keyStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75"))
 	errorStyle        = lipgloss.NewStyle().Foreground(colorError)
 	promptStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
 	progressStyle     = lipgloss.NewStyle().Foreground(colorInstall)
