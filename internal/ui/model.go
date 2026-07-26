@@ -166,7 +166,8 @@ type Model struct {
 	WowWriteWarning string // set when path is valid but not writable
 
 	// Progress state
-	ProgressLabel string
+	ProgressLabel  string
+	ProgressDetail string // current sub-step description
 
 	// Progress animation
 	spinnerFrame  int
@@ -245,6 +246,7 @@ func (m *Model) SetActiveProfile(p *config.Profile) {
 
 func (m *Model) startProgress(label string, step, total int) {
 	m.ProgressLabel = label
+	m.ProgressDetail = ""
 	m.progressStep = step
 	m.progressTotal = total
 	m.progressStart = time.Now()
@@ -287,8 +289,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progressStep = msg.Step
 		m.progressTotal = msg.Total
 		return m, nil
+	case progressDetailMsg:
+		m.ProgressDetail = msg.Detail
+		return m, nil
 	case cloneDoneMsg:
-		m.handleCloneDone(msg)
+		cmd := m.handleCloneDone(msg)
+		return m, cmd
+	case clonePostDoneMsg:
+		m.handleClonePostDone(msg)
 		return m, nil
 	case wowCandidatesMsg:
 		m.WowCandidates = msg.Candidates

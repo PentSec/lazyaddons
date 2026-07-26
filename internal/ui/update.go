@@ -63,57 +63,23 @@ func checkAllUpdatesCmd(addonsRoot string, addons []config.Addon) tea.Cmd {
 
 // applyAddonCmd applies the update for a single addon.
 func applyAddonCmd(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
-	return applyUpdatesCmd(addonsRoot, []config.Addon{a}, ghClient, profile)
-}
-
-// applyUpdatesCmd applies updates for each addon. Branch-tracked
-// addons use Pull; release-tracked addons download the release zip
-// asset from GitHub. All addons get UnpackUpdate or UnpackReleaseZip.
-// On success for release-tracked addons, the config is updated with
-// the new version tag and saved.
-func applyUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
-	return func() tea.Msg {
-		var updated []string
-		for _, a := range addons {
-			repoDir := findRepoDir(addonsRoot, a.Name)
-
-			if a.TrackMode == addon.TrackModeRelease {
-				// Release mode: download zip asset from GitHub.
-				if err := applyReleaseUpdate(addonsRoot, &a, ghClient); err != nil {
-					continue
-				}
-				// Persist the new version in the active profile;
-				// main.go writes the whole config to disk on exit.
-				if profile != nil {
-					for i := range profile.Addons {
-						if profile.Addons[i].Name == a.Name {
-							profile.Addons[i].TrackTarget = a.TrackTarget
-							break
-						}
-					}
-				}
-			} else {
-				// Branch mode: git pull + re-unpack.
-				if repoDir == "" {
-					continue
-				}
-				_ = gitops.ResetWorkingTree(repoDir)
-				_ = gitops.Fetch(repoDir)
-				if err := gitops.Pull(repoDir); err != nil {
-					if branch := gitops.DefaultBranch(repoDir); branch != "" {
-						_ = gitops.MergeFF(repoDir, "refs/remotes/origin/"+branch)
-					}
-				}
-				_ = gitops.ResetWorkingTree(repoDir)
-				addon.UnpackUpdate(addonsRoot, repoDir, a.SubModules)
-			}
-			updated = append(updated, a.Name)
-		}
-		return updateAppliedMsg{Updated: updated}
-	}
+	return applyOneUpdate(addonsRoot, a, ghClient, profile, 1, 1)
 }
 
 func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile, step, total int) tea.Cmd {
+	if a.TrackMode == addon.TrackModeRelease {
+		return applyReleaseUpdatePhased(addonsRoot, a, ghClient, profile, step, total)
+	}
+	return applyBranchUpdatePhased(addonsRoot, a, profile, step, total)
+}
+
+func applyReleaseUpdatePhased(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile, step, total int) tea.Cmd {
+	var (
+		owner, repo, targetTag string
+		zipAsset               *gh.Asset
+		buf                    bytes.Buffer
+		failed                 bool
+	)
 	return tea.Sequence(
 		func() tea.Msg {
 			return progressStepMsg{
@@ -123,98 +89,163 @@ func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, prof
 			}
 		},
 		func() tea.Msg {
+			return progressDetailMsg{Detail: "Checking latest release..."}
+		},
+		func() tea.Msg {
+			if ghClient == nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: github client not available", a.Name)}
+			}
+			var err error
+			owner, repo, err = gh.ParseOwnerRepo(a.URL)
+			if err != nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
 			repoDir := findRepoDir(addonsRoot, a.Name)
-
-			if a.TrackMode == addon.TrackModeRelease {
-				if err := applyReleaseUpdate(addonsRoot, &a, ghClient); err != nil {
-					return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			targetTag = a.TrackTarget
+			if repoDir != "" {
+				if latest, _ := gitops.LatestNewTag(repoDir, a.TrackTarget); latest != "" {
+					targetTag = latest
 				}
-				if profile != nil {
-					for i := range profile.Addons {
-						if profile.Addons[i].Name == a.Name {
-							profile.Addons[i].TrackTarget = a.TrackTarget
-							break
-						}
+			}
+			rel, err := ghClient.ReleaseForTag(owner, repo, targetTag)
+			if err != nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			if rel == nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: release %s not found", a.Name, targetTag)}
+			}
+			zipAsset = rel.FindZipAsset()
+			if zipAsset == nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: no zip asset in release %s", a.Name, targetTag)}
+			}
+			return nil
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			return progressDetailMsg{Detail: "Downloading release..."}
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			buf.Reset()
+			if _, err := ghClient.DownloadAsset(zipAsset.BrowserURL, &buf); err != nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			return nil
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			return progressDetailMsg{Detail: "Extracting addon files..."}
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			known := append([]string{a.Name}, a.SubModules...)
+			promoted, err := addon.UnpackReleaseZip(addonsRoot, bytes.NewReader(buf.Bytes()), int64(buf.Len()), known)
+			if err != nil {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			if len(promoted) == 0 {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: no valid .toc found in release zip", a.Name)}
+			}
+			a.TrackTarget = targetTag
+			if profile != nil {
+				for i := range profile.Addons {
+					if profile.Addons[i].Name == a.Name {
+						profile.Addons[i].TrackTarget = a.TrackTarget
+						break
 					}
 				}
-			} else {
-				if repoDir == "" {
-					return updateAppliedMsg{Err: fmt.Errorf("%s: repo not found", a.Name)}
-				}
-				_ = gitops.ResetWorkingTree(repoDir)
-				_ = gitops.Fetch(repoDir)
-				if err := gitops.Pull(repoDir); err != nil {
-					if branch := gitops.DefaultBranch(repoDir); branch != "" {
-						_ = gitops.MergeFF(repoDir, "refs/remotes/origin/"+branch)
-					}
-				}
-				_ = gitops.ResetWorkingTree(repoDir)
-				addon.UnpackUpdate(addonsRoot, repoDir, a.SubModules)
 			}
 			return updateAppliedMsg{Updated: []string{a.Name}}
 		},
 	)
 }
 
-func applyUpdatesWithProgress(addonsRoot string, addons []config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(addons))
-	for i, a := range addons {
-		cmds = append(cmds, applyOneUpdate(addonsRoot, a, ghClient, profile, i+1, len(addons)))
-	}
-	return tea.Sequence(cmds...)
-}
-
-// applyReleaseUpdate downloads the release zip for an addon and
-// replaces the addon dirs in AddOns with the zip contents.
-func applyReleaseUpdate(addonsRoot string, a *config.Addon, ghClient *gh.Client) error {
-	if ghClient == nil {
-		return fmt.Errorf("github client not available")
-	}
-	owner, repo, err := gh.ParseOwnerRepo(a.URL)
-	if err != nil {
-		return err
-	}
-	// Find the latest tag newer than the current version.
-	// a.TrackTarget is the installed version (stale); we need the
-	// actual target tag to download the right release zip.
-	repoDir := findRepoDir(addonsRoot, a.Name)
-	targetTag := a.TrackTarget
-	if repoDir != "" {
-		if latest, _ := gitops.LatestNewTag(repoDir, a.TrackTarget); latest != "" {
-			targetTag = latest
-		}
-	}
-	rel, err := ghClient.ReleaseForTag(owner, repo, targetTag)
-	if err != nil {
-		return err
-	}
-	if rel == nil {
-		return fmt.Errorf("release %s not found", targetTag)
-	}
-	zipAsset := rel.FindZipAsset()
-	if zipAsset == nil {
-		return fmt.Errorf("no zip asset in release %s", targetTag)
-	}
-
-	// Download zip into memory (WoW addon zips are small).
-	var buf bytes.Buffer
-	if _, err := ghClient.DownloadAsset(zipAsset.BrowserURL, &buf); err != nil {
-		return err
-	}
-
-	// Ensure the main addon name is always cleaned.
-	known := append([]string{a.Name}, a.SubModules...)
-	promoted, err := addon.UnpackReleaseZip(addonsRoot, bytes.NewReader(buf.Bytes()), int64(buf.Len()), known)
-	if err != nil {
-		return err
-	}
-	if len(promoted) == 0 {
-		return fmt.Errorf("no valid .toc found in release zip")
-	}
-	// Update the tracked version in config so the next check
-	// starts from the newly installed release.
-	a.TrackTarget = targetTag
-	return nil
+func applyBranchUpdatePhased(addonsRoot string, a config.Addon, profile *config.Profile, step, total int) tea.Cmd {
+	var (
+		repoDir string
+		failed  bool
+	)
+	return tea.Sequence(
+		func() tea.Msg {
+			return progressStepMsg{
+				Label: fmt.Sprintf("Updating %s...", a.Name),
+				Step:  step,
+				Total: total,
+			}
+		},
+		func() tea.Msg {
+			return progressDetailMsg{Detail: "Preparing repository..."}
+		},
+		func() tea.Msg {
+			repoDir = findRepoDir(addonsRoot, a.Name)
+			if repoDir == "" {
+				failed = true
+				return updateAppliedMsg{Err: fmt.Errorf("%s: repo not found", a.Name)}
+			}
+			_ = gitops.ResetWorkingTree(repoDir)
+			return nil
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			return progressDetailMsg{Detail: "Fetching updates..."}
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			_ = gitops.Fetch(repoDir)
+			return nil
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			return progressDetailMsg{Detail: "Pulling changes..."}
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			if err := gitops.Pull(repoDir); err != nil {
+				if branch := gitops.DefaultBranch(repoDir); branch != "" {
+					_ = gitops.MergeFF(repoDir, "refs/remotes/origin/"+branch)
+				}
+			}
+			_ = gitops.ResetWorkingTree(repoDir)
+			return nil
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			return progressDetailMsg{Detail: "Unpacking addon files..."}
+		},
+		func() tea.Msg {
+			if failed {
+				return nil
+			}
+			addon.UnpackUpdate(addonsRoot, repoDir, a.SubModules)
+			return updateAppliedMsg{Updated: []string{a.Name}}
+		},
+	)
 }
 
 // isBehind returns true if the repo's HEAD is behind its upstream

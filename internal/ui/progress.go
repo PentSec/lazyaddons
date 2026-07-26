@@ -18,10 +18,21 @@ func spinnerCmd() tea.Cmd {
 	})
 }
 
+// sendDetail returns a Cmd that updates the progress detail line.
+func sendDetail(detail string) tea.Cmd {
+	return func() tea.Msg {
+		return progressDetailMsg{Detail: detail}
+	}
+}
+
 type progressStepMsg struct {
 	Label string
 	Step  int
 	Total int
+}
+
+type progressDetailMsg struct {
+	Detail string
 }
 
 func viewProgress(m *Model) string {
@@ -35,6 +46,11 @@ func viewProgress(m *Model) string {
 	b.WriteString(progressStyle.Render(frame + " "))
 	b.WriteString(m.ProgressLabel)
 	b.WriteString(dimStyle.Render(fmt.Sprintf(" (%v)", elapsed)))
+
+	if m.ProgressDetail != "" {
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render("  ⤷ " + m.ProgressDetail))
+	}
 
 	if m.progressTotal > 1 {
 		b.WriteString("\n")

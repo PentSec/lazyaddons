@@ -25,6 +25,19 @@ type cloneDoneMsg struct {
 	Err           error
 }
 
+// clonePostDoneMsg is sent after post-clone processing
+// (PromoteAddonDirs, rename) finishes.
+type clonePostDoneMsg struct {
+	Name          string
+	URL           string
+	Mode          string
+	Target        string
+	DefaultBranch string
+	Promoted      []string
+	AddonsRoot    string
+	Err           error
+}
+
 // releaseFetchedMsg is sent when the GitHub API returns the
 // latest release tag. The handler starts the clone with the real
 // tag name instead of the placeholder "latest".
@@ -197,6 +210,7 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 	}
 
 	m.startProgress(fmt.Sprintf("Cloning %s...", name), 1, 1)
+	m.ProgressDetail = "Cloning repository..."
 
 	return tea.Batch(
 		spinnerCmd(),
@@ -210,8 +224,9 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 }
 
 // handleCloneDone processes a finished clone operation.
-func (m *Model) handleCloneDone(msg cloneDoneMsg) {
+func (m *Model) handleCloneDone(msg cloneDoneMsg) tea.Cmd {
 	m.ProgressLabel = ""
+	m.ProgressDetail = ""
 	if msg.Err != nil {
 		errMsg := msg.Err.Error()
 		if len(errMsg) > 200 {
@@ -219,40 +234,54 @@ func (m *Model) handleCloneDone(msg cloneDoneMsg) {
 		}
 		m.ErrMessage = fmt.Sprintf("Clone failed for %s: %s", msg.Name, errMsg)
 		m.Screen = screenError
-		return
+		return nil
 	}
 
 	destDir, _ := m.WowPath.AddonPath(msg.Name)
 	addonsRoot := string(m.WowPath)
 
-	promoted, err := addon.PromoteAddonDirs(addonsRoot, destDir)
-	if err != nil {
-		m.ErrMessage = fmt.Sprintf("Failed to restructure %s: %v", msg.Name, err)
+	return tea.Sequence(
+		sendDetail("Moving addon folders..."),
+		func() tea.Msg {
+			promoted, err := addon.PromoteAddonDirs(addonsRoot, destDir)
+			if err != nil {
+				return clonePostDoneMsg{Err: fmt.Errorf("Failed to restructure %s: %v", msg.Name, err)}
+			}
+			if len(promoted) == 0 {
+				return clonePostDoneMsg{Err: fmt.Errorf("No valid .toc found in %s.", msg.Name)}
+			}
+			return clonePostDoneMsg{
+				Name:          msg.Name,
+				URL:           msg.URL,
+				Mode:          msg.Mode,
+				Target:        msg.Target,
+				DefaultBranch: msg.DefaultBranch,
+				Promoted:      promoted,
+				AddonsRoot:    addonsRoot,
+			}
+		},
+	)
+}
+
+// handleClonePostDone processes the result of post-clone
+// folder promotion. Runs synchronously in Update.
+func (m *Model) handleClonePostDone(msg clonePostDoneMsg) {
+	if msg.Err != nil {
+		m.ErrMessage = msg.Err.Error()
 		m.Screen = screenError
 		return
 	}
 
-	if len(promoted) == 0 {
-		m.ErrMessage = fmt.Sprintf("No valid .toc found in %s.", msg.Name)
-		m.Screen = screenError
-		return
-	}
-
-	// The addon name is derived from the .toc-bearing folder inside
-	// the repo, not from the URL. This handles repos like
-	// "CleanerChat-WotLK" whose actual addon folder is "CleanerChat".
 	actualName := msg.Name
-	if len(promoted) > 0 {
-		actualName = promoted[0]
+	if len(msg.Promoted) > 0 {
+		actualName = msg.Promoted[0]
 	}
 
-	// If the actual name differs from the clone name, rename the
-	// directories to match.
 	if !strings.EqualFold(actualName, msg.Name) {
-		oldAddon := filepath.Join(addonsRoot, msg.Name)
-		newAddon := filepath.Join(addonsRoot, actualName)
-		oldRepo := filepath.Join(addonsRoot, ".lazyaddons", msg.Name)
-		newRepo := filepath.Join(addonsRoot, ".lazyaddons", actualName)
+		oldAddon := filepath.Join(msg.AddonsRoot, msg.Name)
+		newAddon := filepath.Join(msg.AddonsRoot, actualName)
+		oldRepo := filepath.Join(msg.AddonsRoot, ".lazyaddons", msg.Name)
+		newRepo := filepath.Join(msg.AddonsRoot, ".lazyaddons", actualName)
 		_ = os.Rename(oldAddon, newAddon)
 		_ = os.Rename(oldRepo, newRepo)
 	}
@@ -262,7 +291,7 @@ func (m *Model) handleCloneDone(msg cloneDoneMsg) {
 		URL:         msg.URL,
 		TrackMode:   msg.Mode,
 		TrackTarget: defaultTrackTarget(msg.Target, msg.DefaultBranch),
-		SubModules:  subModules(promoted, actualName),
+		SubModules:  subModules(msg.Promoted, actualName),
 	})
 	m.Statuses[actualName] = StatusOK
 	m.refreshAddonMeta(actualName)
@@ -308,6 +337,7 @@ func updateReleasePicker(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return *m, nil
 		}
 		m.startProgress("Fetching latest release...", 1, 1)
+		m.ProgressDetail = "Querying GitHub API..."
 		return *m, tea.Batch(
 			spinnerCmd(),
 			fetchLatestReleaseCmd(m.GitHub, owner, repo, name, m.AddInput),
@@ -424,6 +454,7 @@ func doReplace(m *Model) (tea.Model, tea.Cmd) {
 
 	// Proceed with clone using the normal flow.
 	m.startProgress(fmt.Sprintf("Cloning %s...", name), 1, 1)
+	m.ProgressDetail = "Cloning repository..."
 	return *m, tea.Batch(
 		spinnerCmd(),
 		cloneCmd(url, destDir, target, cloneDoneMsg{

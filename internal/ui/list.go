@@ -324,6 +324,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a := m.selectedAddon()
 		if a != nil && m.Statuses[a.Name] == StatusUpdate {
 			m.startProgress(fmt.Sprintf("Updating %s...", a.Name), 1, 1)
+			m.ProgressDetail = "Checking for updates..."
 			return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.ActiveProfile))
 		}
 		m.startProgress("Checking for updates...", 1, 1)
@@ -337,12 +338,14 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return *m, nil
 		}
 		m.startProgress(fmt.Sprintf("Updating %s...", a.Name), 1, 1)
+		m.ProgressDetail = "Checking for updates..."
 		return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.ActiveProfile))
 	case "U":
 		if m.UpdateBanner == nil || !m.UpdateBanner.UpdateAvailable {
 			return *m, nil
 		}
 		m.startProgress("Downloading lazyaddons update...", 1, 1)
+		m.ProgressDetail = "Downloading new version..."
 		return *m, tea.Batch(spinnerCmd(), selfUpdateCmd(m.UpdateBanner.LatestVersion))
 	case "p":
 		m.Screen = screenProfilePicker
