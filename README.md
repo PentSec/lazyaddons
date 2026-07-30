@@ -118,7 +118,7 @@ lazyaddons --version
 
 ## How It Works
 
-lazyaddons clones each addon repo into a **`.repo` directory** inside your WoW
+lazyaddons clones each addon repo into a **`.lazyaddons` directory** inside your WoW
 AddOns folder, then unpacks the actual addon folders (the ones containing `.toc`
 files) to the AddOns root so WoW can discover them.
 
@@ -126,8 +126,9 @@ files) to the AddOns root so WoW can discover them.
 Interface/AddOns/
 ├── Details/              ← addon files (what WoW loads)
 │   └── Details.toc
-├── Details.repo/         ← git repository (.git lives here)
-│   └── .git/
+├── .lazyaddons/         ← git repository (.git lives here)
+├───── Details/
+│       └── .git/
 ├── Details_Options/      ← sub-module (included addon)
 │   └── Details_Options.toc
 └── Details_ASD/
@@ -135,7 +136,7 @@ Interface/AddOns/
 ```
 
 On update: deletes the unpacked folders, runs `git fetch` + `git merge --ff-only`
-inside `.repo/`, and re-unpacks fresh copies. The `.git` directory never leaves `.repo/`.
+inside `.lazyaddons/`, and re-unpacks fresh copies. The `.git` directory never leaves `.lazyaddons/`.
 
 The addon name is derived from the `.toc`-bearing folder inside the repo, not from
 the URL. A repo `CleanerChat-WotLK` whose addon folder is `CleanerChat` will be
