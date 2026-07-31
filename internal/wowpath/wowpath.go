@@ -188,11 +188,7 @@ func DetectCandidates() []string {
 	}
 
 	if runtime.GOOS == "windows" {
-		for _, drive := range []string{"C:", "D:", "E:"} {
-			candidates = append(candidates, findAddOnsInDir(filepath.Join(drive+"\\", "Games"))...)
-			candidates = append(candidates, findAddOnsInDir(filepath.Join(drive+"\\", "Program Files"))...)
-			candidates = append(candidates, findAddOnsInDir(filepath.Join(drive+"\\", "Program Files (x86)"))...)
-		}
+		candidates = append(candidates, detectWindowsCandidates()...)
 	}
 
 	return dedupeCandidates(candidates)

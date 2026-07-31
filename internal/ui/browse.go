@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -22,6 +23,33 @@ func viewWowBrowse(m *Model) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Browse WoW folder "))
 	b.WriteString("\n\n")
+
+	// Drive-root view (Windows): WowBrowsePath is the sentinel set
+	// byBrowseStart on Windows. We render the enumerated drives
+	// directly and skip the breadcrumb / parent-up affordances, which
+	// do not apply at the "My Computer" pseudo-root.
+	if wowpath.IsBrowseRoot(m.WowBrowsePath) {
+		b.WriteString(dimStyle.Render("Drives"))
+		b.WriteString("\n\n")
+		roots := driveRoots()
+		for i, d := range roots {
+			marker := "  "
+			if i == m.WowBrowseSel {
+				marker = "> "
+			}
+			entry := marker + d
+			if i == m.WowBrowseSel {
+				b.WriteString(selectedStyle.Render(entry))
+			} else {
+				b.WriteString(entry)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("↑/↓ navigate • enter open drive • esc cancel"))
+		b.WriteString("\n")
+		return b.String()
+	}
 
 	// Breadcrumbs
 	parts := strings.Split(filepath.Clean(m.WowBrowsePath), string(filepath.Separator))
@@ -75,6 +103,35 @@ func viewWowBrowse(m *Model) string {
 
 // updateWowBrowse handles keyboard events for the directory browser.
 func updateWowBrowse(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Drive-root view (Windows): keys are navigate/open/cancel only.
+	// backspace-up does nothing — we are already at the pseudo-root.
+	if wowpath.IsBrowseRoot(m.WowBrowsePath) {
+		switch key.String() {
+		case "esc":
+			m.Screen = screenWowPath
+			return *m, nil
+		case "up", "k":
+			if m.WowBrowseSel > 0 {
+				m.WowBrowseSel--
+			}
+			return *m, nil
+		case "down", "j":
+			roots := driveRoots()
+			if m.WowBrowseSel < len(roots)-1 {
+				m.WowBrowseSel++
+			}
+			return *m, nil
+		case "enter":
+			roots := driveRoots()
+			if m.WowBrowseSel >= 0 && m.WowBrowseSel < len(roots) {
+				m.WowBrowsePath = roots[m.WowBrowseSel]
+				m.WowBrowseSel = 0
+			}
+			return *m, nil
+		}
+		return *m, nil
+	}
+
 	switch key.String() {
 	case "esc":
 		m.Screen = screenWowPath
@@ -102,6 +159,14 @@ func updateWowBrowse(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if parent != m.WowBrowsePath {
 			m.WowBrowsePath = parent
 			m.WowBrowseSel = 0
+		} else {
+			// Already at the filesystem root of this drive: bounce
+			// up to the drive-list pseudo-root (Windows only). On
+			// other platforms there is no higher level, so stay put.
+			if runtime.GOOS == "windows" {
+				m.WowBrowsePath = wowpath.BrowseStart()
+				m.WowBrowseSel = 0
+			}
 		}
 		return *m, nil
 	case "s":
@@ -126,7 +191,10 @@ func updateWowBrowse(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
-// listDirs returns directories in the given path, sorted by name.
+// listDirs returns directories in the given path, sorted with
+// WoW-suggestive folder names surfaced to the top so the user can
+// reach their installation in fewer keystrokes. The remaining
+// directories retain alphabetical order.
 func listDirs(path string) ([]browseEntry, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -145,10 +213,21 @@ func listDirs(path string) ([]browseEntry, error) {
 			Path: filepath.Join(path, e.Name()),
 		})
 	}
-	sort.Slice(dirs, func(i, j int) bool {
+	sort.SliceStable(dirs, func(i, j int) bool {
 		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
 	})
-	return dirs, nil
+	// Reorder so WoW-suggestive entries lead the list. We use a
+	// stable partition (two passes) so the alphabetical order inside
+	// each subgroup is preserved.
+	wow, rest := make([]browseEntry, 0, len(dirs)), make([]browseEntry, 0, len(dirs))
+	for _, d := range dirs {
+		if isWowFolder(d.Name) {
+			wow = append(wow, d)
+		} else {
+			rest = append(rest, d)
+		}
+	}
+	return append(wow, rest...), nil
 }
 
 // isWowFolder returns true if the folder name suggests it's WoW-related.
@@ -160,4 +239,15 @@ func isWowFolder(name string) bool {
 		}
 	}
 	return false
+}
+
+// driveRoots returns the top-level browsing roots for the current
+// platform. On Windows this is the enumerated drive list (C:\, D:\…);
+// elsewhere wowpath.ListBrowseRoots already returns the home dir,
+// which the browser reaches through the non-sentinel path on Unix.
+// We expose a thin alias here so viewWowBrowse does not need to
+// import wowpath for the browse-root case, keeping the imports tidy
+// despite the win/non-win split living in the wowpath package.
+func driveRoots() []string {
+	return wowpath.ListBrowseRoots()
 }

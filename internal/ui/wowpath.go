@@ -145,7 +145,7 @@ func updateWowPath(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return *m, tea.Quit
 	case "b":
-		m.WowBrowsePath = userHomeDir()
+		m.WowBrowsePath = wowpath.BrowseStart()
 		m.WowBrowseSel = 0
 		m.Screen = screenWowBrowse
 		return *m, nil
