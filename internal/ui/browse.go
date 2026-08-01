@@ -46,7 +46,7 @@ func viewWowBrowse(m *Model) string {
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑/↓ navigate • enter open drive • esc cancel"))
+		b.WriteString(renderHelp("↑/↓ navigate", "enter open drive", "esc cancel"))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -63,7 +63,7 @@ func viewWowBrowse(m *Model) string {
 	if err != nil {
 		b.WriteString(errorStyle.Render("Cannot read: " + err.Error()))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("enter open • backspace up • esc cancel"))
+		b.WriteString(renderHelp("enter open", "backspace up", "esc cancel"))
 		return b.String()
 	}
 
@@ -96,7 +96,7 @@ func viewWowBrowse(m *Model) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓ navigate • enter open • backspace up • s select this folder • esc cancel"))
+	b.WriteString(renderHelp("↑/↓ navigate", "enter open", "backspace up", "s select this folder", "esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }

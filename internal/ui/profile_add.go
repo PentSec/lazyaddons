@@ -27,7 +27,7 @@ func viewProfileAdd(m *Model) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(helpStyle.Render("enter next: WoW path • esc back"))
+	b.WriteString(renderHelp("enter next: WoW path", "esc back"))
 	b.WriteString("\n")
 	return b.String()
 }

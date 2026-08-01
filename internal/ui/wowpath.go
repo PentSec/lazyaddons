@@ -42,9 +42,9 @@ func viewWowPath(m *Model) string {
 		b.WriteString("Ignore and continue anyway")
 		b.WriteString("\n\n")
 		if m.PendingProfileName != "" {
-			b.WriteString(helpStyle.Render("enter launch as admin • esc back to name • i ignore"))
+			b.WriteString(renderHelp("enter launch as admin", "esc back to name", "i ignore"))
 		} else {
-			b.WriteString(helpStyle.Render("enter launch as admin • esc choose another • i ignore"))
+			b.WriteString(renderHelp("enter launch as admin", "esc choose another", "i ignore"))
 		}
 		b.WriteString("\n")
 		return b.String()
@@ -89,18 +89,17 @@ func viewWowPath(m *Model) string {
 		b.WriteString("\n")
 	}
 
-	var help strings.Builder
+	var help []string
 	if len(m.WowCandidates) > 0 {
-		help.WriteString("↑↓ pick candidate  •  ")
+		help = append(help, "↑↓ pick candidate")
 	}
-	help.WriteString("type custom path  •  ")
-	help.WriteString("b browse filesystem  •  ")
+	help = append(help, "type custom path", "b browse filesystem")
 	if m.PendingProfileName != "" {
-		help.WriteString("enter confirm  •  esc back")
+		help = append(help, "enter confirm", "esc back")
 	} else {
-		help.WriteString("enter confirm  •  esc quit")
+		help = append(help, "enter confirm", "esc quit")
 	}
-	b.WriteString(helpStyle.Render(help.String()))
+	b.WriteString(renderHelp(help...))
 	b.WriteString("\n")
 	return b.String()
 }

@@ -30,7 +30,7 @@ func viewProfileRename(m *Model) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(helpStyle.Render("enter save • esc cancel"))
+	b.WriteString(renderHelp("enter save", "esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }

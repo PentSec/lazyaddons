@@ -36,7 +36,7 @@ func viewProfileDelete(m *Model) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(helpStyle.Render("y/enter delete • n/esc cancel"))
+	b.WriteString(renderHelp("y/enter delete", "n/esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }

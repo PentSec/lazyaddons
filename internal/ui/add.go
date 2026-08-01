@@ -94,7 +94,7 @@ func viewAddForm(m *Model) string {
 		b.WriteString(errorStyle.Render("Error: " + m.AddError))
 		b.WriteString("\n")
 	}
-	b.WriteString(helpStyle.Render("enter submit • esc cancel"))
+	b.WriteString(renderHelp("enter submit", "esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -215,12 +215,12 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 	return tea.Batch(
 		spinnerCmd(),
 		cloneCmd(url, destDir, target, cloneDoneMsg{
-		Name:   name,
-		URL:    url,
-		Mode:   mode,
-		Target: target,
-	}),
-)
+			Name:   name,
+			URL:    url,
+			Mode:   mode,
+			Target: target,
+		}),
+	)
 }
 
 // handleCloneDone processes a finished clone operation.
@@ -315,7 +315,7 @@ func viewReleasePicker(m *Model) string {
 		b.WriteString(errorStyle.Render("Error: " + m.AddError))
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("1 branch • 2 release • esc cancel"))
+	b.WriteString(renderHelp("1 branch", "2 release", "esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -400,7 +400,7 @@ func viewConfirmReplace(m *Model) string {
 		b.WriteString(dimStyle.Render(replaceMarker + replaceLine))
 	}
 	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("↑↓ select • enter confirm • esc cancel"))
+	b.WriteString(renderHelp("↑↓ select", "enter confirm", "esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
