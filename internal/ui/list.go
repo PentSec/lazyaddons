@@ -255,9 +255,6 @@ func tabBaseLine(inner, start int, cols colWidths) string {
 		}
 		x += w
 	}
-	if x >= 0 && x < inner {
-		line[x] = '┴'
-	}
 	return tabBorderColorStyle.Render(string(line))
 }
 
