@@ -175,6 +175,10 @@ type Model struct {
 	progressStep  int
 	progressTotal int
 
+	// baseScreen remembers the screen that started a progress
+	// operation so the progress can float as a modal over it.
+	baseScreen screen
+
 	// Remove confirmation state
 	PendingRemove string
 	ConfirmCursor int // 0 = yes, 1 = cancel
@@ -252,6 +256,7 @@ func (m *Model) startProgress(label string, step, total int) {
 	m.progressTotal = total
 	m.progressStart = time.Now()
 	m.spinnerFrame = 0
+	m.baseScreen = m.Screen
 	m.Screen = screenProgress
 }
 
@@ -377,7 +382,11 @@ func (m Model) View() string {
 	case screenReleasePicker:
 		content = viewReleasePicker(&m)
 	case screenProgress:
-		content = viewProgress(&m)
+		if m.baseScreen == screenList {
+			content = viewProgressModal(&m)
+		} else {
+			content = viewProgress(&m)
+		}
 	case screenError:
 		content = viewError(&m)
 	case screenWowPath:

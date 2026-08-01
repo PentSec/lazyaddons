@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -61,6 +62,26 @@ func viewProgress(m *Model) string {
 	b.WriteString(helpStyle.Render("press ctrl+c to cancel"))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// viewProgressModal renders the progress panel as a centered modal
+// floating on top of the addon list, mirroring the remove-confirm
+// overlay. Used when a progress operation started from the list
+// (addon update, check-all, self-update).
+func viewProgressModal(m *Model) string {
+	inner := max(m.Width-2, minInner)
+	avail := max(m.Height-11, 1)
+	base := modalBase(m)
+
+	modal := dialogBoxStyle.Render(strings.TrimRight(viewProgress(m), "\n"))
+
+	x := max((inner-lipgloss.Width(modal))/2, 0)
+	y := max((avail-lipgloss.Height(modal))/2, 0)
+
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(base),
+		lipgloss.NewLayer(modal).X(x).Y(y),
+	).Render()
 }
 
 func updateProgress(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {

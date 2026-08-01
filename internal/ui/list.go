@@ -518,11 +518,18 @@ func updateConfirmRemove(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // of the addon list, composited over the still-visible list below it
 // (mirrors the modal of the lipgloss layout example).
 func viewConfirmRemove(m *Model) string {
+	return viewConfirmModal(m, fmt.Sprintf(
+		"Are you sure you want to remove %q?\nThis will delete the addon folder and its repository.",
+		m.PendingRemove,
+	))
+}
+
+// modalBase renders the full list padded to the interior canvas so
+// an overlay modal can be centered on the whole window.
+func modalBase(m *Model) string {
 	inner := max(m.Width-2, minInner)
 	avail := max(m.Height-11, 1)
 
-	// Base layer: the full list padded to the interior canvas so the
-	// dialog can be centered on the whole window.
 	lines := strings.Split(viewList(m), "\n")
 	canvas := make([]string, 0, avail)
 	for i := 0; i < avail; i++ {
@@ -532,7 +539,15 @@ func viewConfirmRemove(m *Model) string {
 			canvas = append(canvas, repeat(" ", inner))
 		}
 	}
-	base := strings.Join(canvas, "\n")
+	return strings.Join(canvas, "\n")
+}
+
+// viewConfirmModal renders a centered yes/no dialog floating on top
+// of the addon list. The list stays visible underneath the overlay.
+func viewConfirmModal(m *Model, question string) string {
+	inner := max(m.Width-2, minInner)
+	avail := max(m.Height-11, 1)
+	base := modalBase(m)
 
 	yes := buttonStyle.Render("Yes")
 	cancel := buttonStyle.Render("Cancel")
@@ -542,16 +557,13 @@ func viewConfirmRemove(m *Model) string {
 		cancel = activeButtonStyle.Render("Cancel")
 	}
 
-	question := lipgloss.NewStyle().
+	q := lipgloss.NewStyle().
 		Width(50).
 		Align(lipgloss.Center).
-		Render(fmt.Sprintf(
-			"Are you sure you want to remove %q?\nThis will delete the addon folder and its repository.",
-			m.PendingRemove,
-		))
+		Render(question)
 
 	ui := lipgloss.JoinVertical(lipgloss.Center,
-		question,
+		q,
 		lipgloss.JoinHorizontal(lipgloss.Top, yes, cancel),
 	)
 	modal := dialogBoxStyle.Render(ui)
@@ -577,21 +589,21 @@ var (
 	progressStyle     = lipgloss.NewStyle().Foreground(colorInstall)
 	releaseSelStyle   = lipgloss.NewStyle().Bold(true)
 	updateBannerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Background(lipgloss.Color("58"))
-	tabHeaderStyle = lipgloss.NewStyle().
-			Border(lipgloss.Border{
-				Top:         "─",
-				Bottom:      "─",
-				Left:        "│",
-				Right:       "│",
-				TopLeft:     "╭",
-				TopRight:    "╮",
-				BottomLeft:  "┴",
-				BottomRight: "┴",
-			}, true).
-			BorderBottom(false).
-			BorderForeground(lipgloss.Color("#874BFD")).
-			Padding(0, 1).
-			Align(lipgloss.Center)
+	tabHeaderStyle    = lipgloss.NewStyle().
+				Border(lipgloss.Border{
+			Top:         "─",
+			Bottom:      "─",
+			Left:        "│",
+			Right:       "│",
+			TopLeft:     "╭",
+			TopRight:    "╮",
+			BottomLeft:  "┴",
+			BottomRight: "┴",
+		}, true).
+		BorderBottom(false).
+		BorderForeground(lipgloss.Color("#874BFD")).
+		Padding(0, 1).
+		Align(lipgloss.Center)
 	tabBorderColorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#874BFD"))
 
 	// Confirm-remove modal styles (mirrors the lipgloss layout example).
