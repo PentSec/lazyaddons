@@ -20,7 +20,7 @@ func viewProfilePicker(m *Model) string {
 	if len(m.Config.Profiles) == 0 {
 		b.WriteString(dimStyle.Render("No profiles — create one?"))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render("a add profile • q quit"))
+		b.WriteString(renderHelp("a add profile", "q quit"))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -31,7 +31,7 @@ func viewProfilePicker(m *Model) string {
 	}
 	b.WriteString(l.String())
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter switch • a add • r rename • d delete • esc back • q quit"))
+	b.WriteString(renderHelp("enter switch", "a add", "r rename", "d delete", "esc back", "q quit"))
 	b.WriteString("\n")
 	return b.String()
 }

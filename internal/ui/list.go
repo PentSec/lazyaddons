@@ -80,7 +80,7 @@ func computeCols(inner int) colWidths {
 		Name:    int(22 * scale),
 		Ver:     int(8 * scale),
 		Track:   int(15 * scale),
-		S:       5,
+		S:       9,
 		Updated: int(10 * scale),
 	}
 	// Every header column renders inside a bordered tab, so the badge
@@ -205,7 +205,7 @@ func viewList(m *Model) string {
 		tabHeaderStyle.Width(cols.Name+2).Render("NAME"),
 		tabHeaderStyle.Width(cols.Ver+1).Render("VER"),
 		tabHeaderStyle.Width(cols.Track+1).Render("TRACK"),
-		tabHeaderStyle.Width(cols.S+1).Render("S"),
+		tabHeaderStyle.Width(cols.S+1).Render("STATUS"),
 		tabHeaderStyle.Width(cols.Updated+2).Render("UPDATED"),
 	))
 	b.WriteString("\n")
@@ -238,7 +238,7 @@ func viewList(m *Model) string {
 	if m.SearchQuery != "" {
 		b.WriteString(renderHelp("esc clear"))
 	} else {
-		b.WriteString(renderHelp("/ search", "a add", "d rm", "enter update", "p profiles", "q quit"))
+		b.WriteString(renderHelp("/ search", "a add", "d remove", "enter update", "p profiles", "q quit"))
 	}
 	return b.String()
 }

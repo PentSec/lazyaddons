@@ -6,13 +6,13 @@
 │|_____\__,_/___|\__, | /_/ \_\__,_|\__,_|\___/|_| |_|___/ │
 │ |___/ │
 │3 addons │
-│ ╭─────────────────╮╭───────╮╭──────────────╮╭────╮╭───────────╮ │
-│ │ NAME ││ VER ││ TRACK ││ S ││ UPDATED │ │
-│───┴──────────────────┴────────┴───────────────┴─────┴────────────┴───────────│
+│ ╭─────────────╮╭───────╮╭──────────────╮╭────────╮╭───────────╮ │
+│ │ NAME ││ VER ││ TRACK ││ STATUS ││ UPDATED │ │
+│───┴──────────────┴────────┴───────────────┴─────────┴────────────┴───────────│
 │ Atlas branch:main ✓ up to date │
 ││ Bagnon release:v1.0.0 ↑ update avail │
 │ Details branch:main ✗ error │
 │ │
-│/ search • a add • d rm • enter update • p profiles • q quit │
+│/ search • a add • d remove • enter update • p profiles • q quit │
 │Profile: Retail lazyaddons vdev│
 ╰──────────────────────────────────────────────────────────────────────────────╯
