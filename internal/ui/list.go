@@ -63,7 +63,7 @@ func renderHelp(parts ...string) string {
 // colWidths computes proportional column widths for the addon list
 // given the inner content width (border interior).
 type colWidths struct {
-	Name, Ver, Track, Updated int
+	Name, Ver, Track, S, Updated int
 }
 
 func computeCols(inner int) colWidths {
@@ -76,12 +76,22 @@ func computeCols(inner int) colWidths {
 		avail = 55
 	}
 	scale := float64(avail) / float64(55)
-	return colWidths{
+	cols := colWidths{
 		Name:    int(22 * scale),
 		Ver:     int(8 * scale),
 		Track:   int(15 * scale),
+		S:       5,
 		Updated: int(10 * scale),
 	}
+	// Every header column renders inside a bordered tab, so the badge
+	// and updated columns need at least their natural tab width
+	// (text + border + padding). Take the extra room from the name
+	// column, which has the most slack.
+	if cols.Updated < 11 {
+		cols.Name -= (11 - cols.Updated) + (cols.S - 1)
+		cols.Updated = 11
+	}
+	return cols
 }
 
 // addonGlowRow renders one addon as a single-line glow list item
@@ -106,11 +116,11 @@ func addonGlowRow(m *Model, a config.Addon, cols colWidths) string {
 	}
 	status := renderBadge(m.Statuses[a.Name])
 	label := m.Statuses[a.Name].Label()
-	return fmt.Sprintf("%-*s %-*s %-*s %s %-*s  %s",
+	return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s  %s",
 		cols.Name+1, name,
 		cols.Ver, ver,
 		cols.Track, track,
-		status,
+		cols.S, status,
 		cols.Updated, updated,
 		label)
 }
@@ -181,20 +191,25 @@ func viewList(m *Model) string {
 		m.ScrollOffset = 0
 	}
 
-	// Column headers. The leading padding mirrors the glow
-	// enumerator (margin 1 + marker 2) so headers line up with the
-	// rows.
+	// Column headers, one bordered tab per column (mirrors the tabs
+	// of the lipgloss layout example). The leading padding mirrors
+	// the glow enumerator (margin 1 + marker 2) so headers line up
+	// with the rows. Tabs sit flush against each other and each
+	// forced width absorbs the following space separator, so the tab
+	// row is exactly as wide as a data row. The tab base is drawn
+	// separately, edge to edge, with ┴ at each column boundary.
 	b.WriteString(dimStyle.Render(fmt.Sprintf("%d addons", shown)))
 	b.WriteString("\n")
-	b.WriteString(headerStyle.Render(
-		fmt.Sprintf("   %-*s %-*s %-*s %s %-*s  %s",
-			cols.Name+1, "NAME",
-			cols.Ver, "VER",
-			cols.Track, "TRACK",
-			"S",
-			cols.Updated, "UPDATED",
-			""),
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+		"   ",
+		tabHeaderStyle.Width(cols.Name+2).Render("NAME"),
+		tabHeaderStyle.Width(cols.Ver+1).Render("VER"),
+		tabHeaderStyle.Width(cols.Track+1).Render("TRACK"),
+		tabHeaderStyle.Width(cols.S+1).Render("S"),
+		tabHeaderStyle.Width(cols.Updated+2).Render("UPDATED"),
 	))
+	b.WriteString("\n")
+	b.WriteString(tabBaseLine(inner, 3, cols))
 	b.WriteString("\n")
 
 	// Glow-style list of the visible addons. The selected index is
@@ -226,6 +241,24 @@ func viewList(m *Model) string {
 		b.WriteString(renderHelp("/ search", "a add", "d rm", "enter update", "p profiles", "q quit"))
 	}
 	return b.String()
+}
+
+// tabBaseLine renders the tab underline as a full-width line with ┴
+// at each column boundary, running edge to edge of the inner width.
+func tabBaseLine(inner, start int, cols colWidths) string {
+	line := []rune(strings.Repeat("─", inner))
+	widths := []int{cols.Name + 2, cols.Ver + 1, cols.Track + 1, cols.S + 1, cols.Updated + 2}
+	x := start
+	for _, w := range widths {
+		if x >= 0 && x < inner {
+			line[x] = '┴'
+		}
+		x += w
+	}
+	if x >= 0 && x < inner {
+		line[x] = '┴'
+	}
+	return tabBorderColorStyle.Render(string(line))
 }
 
 // filterAddons returns addons whose names contain query (case-insensitive).
@@ -324,6 +357,7 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return *m, nil
 		}
 		m.PendingRemove = a.Name
+		m.ConfirmCursor = 0
 		m.Screen = screenConfirmRemove
 		return *m, nil
 	case "u":
@@ -450,10 +484,24 @@ func doRemove(m *Model) {
 }
 
 // updateConfirmRemove handles key presses on the remove-confirmation
-// screen. y/enter confirms, n/esc cancels.
+// screen. left/right move the active button, enter activates it, and
+// y/esc keep working as direct confirm/cancel shortcuts.
 func updateConfirmRemove(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
-	case "y", "Y", "enter":
+	case "left", "shift+tab":
+		m.ConfirmCursor = 0
+		return *m, nil
+	case "right", "tab":
+		m.ConfirmCursor = 1
+		return *m, nil
+	case "enter":
+		if m.ConfirmCursor == 0 {
+			doRemove(m)
+		}
+		m.PendingRemove = ""
+		m.Screen = screenList
+		return *m, nil
+	case "y", "Y":
 		doRemove(m)
 		m.PendingRemove = ""
 		m.Screen = screenList
@@ -466,25 +514,60 @@ func updateConfirmRemove(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return *m, nil
 }
 
-// viewConfirmRemove renders the confirmation prompt.
+// viewConfirmRemove renders the confirmation dialog floating on top
+// of the addon list, composited over the still-visible list below it
+// (mirrors the modal of the lipgloss layout example).
 func viewConfirmRemove(m *Model) string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render(" Remove Addon "))
-	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf(
-		"Are you sure you want to remove %q?\nThis will delete the addon folder and its repository.",
-		m.PendingRemove,
-	))
-	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("y/enter confirm • n/esc cancel"))
-	b.WriteString("\n")
-	return b.String()
+	inner := max(m.Width-2, minInner)
+	avail := max(m.Height-11, 1)
+
+	// Base layer: the full list padded to the interior canvas so the
+	// dialog can be centered on the whole window.
+	lines := strings.Split(viewList(m), "\n")
+	canvas := make([]string, 0, avail)
+	for i := 0; i < avail; i++ {
+		if i < len(lines) {
+			canvas = append(canvas, pad(lines[i], inner))
+		} else {
+			canvas = append(canvas, repeat(" ", inner))
+		}
+	}
+	base := strings.Join(canvas, "\n")
+
+	yes := buttonStyle.Render("Yes")
+	cancel := buttonStyle.Render("Cancel")
+	if m.ConfirmCursor == 0 {
+		yes = activeButtonStyle.Render("Yes")
+	} else {
+		cancel = activeButtonStyle.Render("Cancel")
+	}
+
+	question := lipgloss.NewStyle().
+		Width(50).
+		Align(lipgloss.Center).
+		Render(fmt.Sprintf(
+			"Are you sure you want to remove %q?\nThis will delete the addon folder and its repository.",
+			m.PendingRemove,
+		))
+
+	ui := lipgloss.JoinVertical(lipgloss.Center,
+		question,
+		lipgloss.JoinHorizontal(lipgloss.Top, yes, cancel),
+	)
+	modal := dialogBoxStyle.Render(ui)
+
+	x := max((inner-lipgloss.Width(modal))/2, 0)
+	y := max((avail-lipgloss.Height(modal))/2, 0)
+
+	return lipgloss.NewCompositor(
+		lipgloss.NewLayer(base),
+		lipgloss.NewLayer(modal).X(x).Y(y),
+	).Render()
 }
 
 // Style cache for the list screen.
 var (
 	titleStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
-	headerStyle       = lipgloss.NewStyle().Bold(true).Underline(true)
 	selectedStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
 	dimStyle          = lipgloss.NewStyle().Faint(true)
 	helpStyle         = lipgloss.NewStyle().Faint(true)
@@ -494,4 +577,35 @@ var (
 	progressStyle     = lipgloss.NewStyle().Foreground(colorInstall)
 	releaseSelStyle   = lipgloss.NewStyle().Bold(true)
 	updateBannerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Background(lipgloss.Color("58"))
+	tabHeaderStyle = lipgloss.NewStyle().
+			Border(lipgloss.Border{
+				Top:         "─",
+				Bottom:      "─",
+				Left:        "│",
+				Right:       "│",
+				TopLeft:     "╭",
+				TopRight:    "╮",
+				BottomLeft:  "┴",
+				BottomRight: "┴",
+			}, true).
+			BorderBottom(false).
+			BorderForeground(lipgloss.Color("#874BFD")).
+			Padding(0, 1).
+			Align(lipgloss.Center)
+	tabBorderColorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#874BFD"))
+
+	// Confirm-remove modal styles (mirrors the lipgloss layout example).
+	dialogBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#874BFD")).
+			Padding(1, 0)
+	buttonStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFF7DB")).
+			Background(lipgloss.Color("#888B7E")).
+			Padding(0, 3).
+			MarginTop(1)
+	activeButtonStyle = buttonStyle.
+				Background(lipgloss.Color("#F25D94")).
+				Underline(true).
+				MarginRight(2)
 )

@@ -140,9 +140,9 @@ type Model struct {
 	ActiveProfile *config.Profile
 
 	// Add flow state
-	AddInput        string
-	AddReleases     []github.Release
-	AddError        string
+	AddInput         string
+	AddReleases      []github.Release
+	AddError         string
 	AddPickedRelease string // "" => branch mode, otherwise tag
 
 	// Clone state — carried across the progress screen so the
@@ -155,15 +155,15 @@ type Model struct {
 	}
 
 	// WoW path setup state
-	WowPathInput string
-	WowPathError string
-	WowCandidates []string // auto-detected candidates
-	WowCandSel    int      // selected candidate index (-1 = none)
-	WowSearching  bool     // true while detection is running
-	WowBrowsePath  string // current directory in browser
-	WowBrowseSel   int    // selected index in browser
-	WowBrowseError string // error message for browser
-	WowWriteWarning string // set when path is valid but not writable
+	WowPathInput    string
+	WowPathError    string
+	WowCandidates   []string // auto-detected candidates
+	WowCandSel      int      // selected candidate index (-1 = none)
+	WowSearching    bool     // true while detection is running
+	WowBrowsePath   string   // current directory in browser
+	WowBrowseSel    int      // selected index in browser
+	WowBrowseError  string   // error message for browser
+	WowWriteWarning string   // set when path is valid but not writable
 
 	// Progress state
 	ProgressLabel  string
@@ -177,14 +177,15 @@ type Model struct {
 
 	// Remove confirmation state
 	PendingRemove string
+	ConfirmCursor int // 0 = yes, 1 = cancel
 
 	// Replace folder confirmation state
-	ReplaceFolder   string
-	ReplaceName     string
-	ReplaceURL      string
-	ReplaceMode     string
-	ReplaceTarget   string
-	ReplaceSel      int // 0 = keep existing, 1 = replace
+	ReplaceFolder string
+	ReplaceName   string
+	ReplaceURL    string
+	ReplaceMode   string
+	ReplaceTarget string
+	ReplaceSel    int // 0 = keep existing, 1 = replace
 
 	// Self-update state
 	UpdateBanner *update.CheckResult

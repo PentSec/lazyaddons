@@ -138,7 +138,9 @@ func (m *Model) Footer(width int) string {
 }
 
 // WrapFrame wraps arbitrary content in a rounded border with a
-// multi-color gradient that blends across the frame perimeter.
+// multi-color gradient that blends across the frame perimeter. The
+// given width is the border interior, so the border is drawn around
+// a content area of exactly width columns.
 func WrapFrame(content string, width int) string {
 	width = max(width, minInner)
 	var padded []string
@@ -156,6 +158,6 @@ func WrapFrame(content string, width int) string {
 			charmtone.Charple,
 			charmtone.Sriracha,
 		).
-		Width(width).
+		Width(width + 2).
 		Render(content)
 }
