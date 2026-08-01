@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -119,22 +118,25 @@ func truncateVisible(s string, n int) string {
 	return s
 }
 
-// Footer returns the version + active-profile indicator padded
-// to the given content width. When no profile is active the
-// indicator shows "Profile: none" so the user always knows
-// whether they're operating on a real profile or the
+// Footer returns the active-profile indicator on the left edge and
+// the version on the right edge of the given content width. When no
+// profile is active the indicator shows "Profile: none" so the user
+// always knows whether they're operating on a real profile or the
 // pre-profile-addition empty state.
 func (m *Model) Footer(width int) string {
-	style := lipgloss.NewStyle().Faint(true)
-	version := app.Version
+	faint := lipgloss.NewStyle().Faint(true)
+	version := faint.Render("lazyaddons v" + app.Version)
 	profileName := "none"
 	if m != nil && m.ActiveProfile != nil && m.ActiveProfile.Name != "" {
 		profileName = m.ActiveProfile.Name
 	}
-	return pad(
-		style.Render(fmt.Sprintf("lazyaddons v%s  •  Profile: %s", version, profileName)),
-		width,
-	)
+	profile := faint.Render("Profile: " + profileName)
+
+	gap := width - visibleLen(profile) - visibleLen(version)
+	if gap < 1 {
+		gap = 1
+	}
+	return profile + repeat(" ", gap) + version
 }
 
 // WrapFrame wraps arbitrary content in a rounded border with a
