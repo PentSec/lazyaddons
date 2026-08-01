@@ -11,7 +11,7 @@ import (
 
 // selfUpdateDoneMsg is posted when the self-update download completes.
 type selfUpdateDoneMsg struct {
-	Err     error
+	Err        error
 	NewVersion string
 }
 
@@ -37,5 +37,6 @@ func handleSelfUpdateDone(m *Model, msg selfUpdateDoneMsg) {
 		"lazyaddons updated to %s!\nRestart the application to use the new version.",
 		msg.NewVersion,
 	)
+	m.PendingQuit = true
 	m.Screen = screenError
 }

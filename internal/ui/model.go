@@ -131,6 +131,10 @@ type Model struct {
 	Selection  int
 	Statuses   map[string]AddonStatus // keyed by addon.Name
 	ErrMessage string
+	// PendingQuit is set when the error screen is informational and
+	// any key should quit the app instead of returning to the list
+	// (e.g. after a successful self-update that needs a restart).
+	PendingQuit bool
 
 	// ActiveProfile points into Config.Profiles at the currently
 	// active profile. nil when no profile is active (e.g. fresh
@@ -347,6 +351,11 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case screenProgress:
 		return updateProgress(&m, key)
 	case screenError:
+		if m.PendingQuit {
+			m.PendingQuit = false
+			m.ErrMessage = ""
+			return m, tea.Quit
+		}
 		m.Screen = screenList
 		m.ErrMessage = ""
 		return m, nil

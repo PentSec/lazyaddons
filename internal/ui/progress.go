@@ -100,9 +100,13 @@ func viewError(m *Model) string {
 	if len(msg) > 120 {
 		msg = msg[:120] + "..."
 	}
+	help := "press any key to return"
+	if m.PendingQuit {
+		help = "press any key to quit"
+	}
 	b.WriteString(errorStyle.Render(msg))
 	b.WriteString("\n\n")
-	b.WriteString(helpStyle.Render("press any key to return"))
+	b.WriteString(helpStyle.Render(help))
 	b.WriteString("\n")
 	return b.String()
 }
