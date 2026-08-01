@@ -2,15 +2,16 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/pentsec/lazyaddons/internal/app"
 )
 
 var (
-	colorPurple = lipgloss.Color("99")
-	colorText   = lipgloss.Color("51")
+	colorText = lipgloss.Color("51")
 )
 
 // minInner is the smallest border interior we allow, so the logo
@@ -136,43 +137,25 @@ func (m *Model) Footer(width int) string {
 	)
 }
 
-// WrapFrame wraps arbitrary content in the purple box-drawing border
-// used by the header. Every line is padded to width and flanked by
-// ║ on both sides, with a top ╔═══╗ and bottom ╚═══╝.
+// WrapFrame wraps arbitrary content in a rounded border with a
+// multi-color gradient that blends across the frame perimeter.
 func WrapFrame(content string, width int) string {
 	width = max(width, minInner)
-	border := lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
-	sep := border.Render("║")
-	top := border.Render("╔" + repeat("═", width) + "╗")
-	bot := border.Render("╚" + repeat("═", width) + "╝")
-
-	var lines []string
-	lines = append(lines, top)
-	for _, line := range splitLines(content) {
-		lines = append(lines, sep+pad(line, width)+sep)
+	var padded []string
+	for _, line := range strings.Split(content, "\n") {
+		padded = append(padded, pad(line, width))
 	}
-	lines = append(lines, bot)
+	content = strings.Join(padded, "\n")
 
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
-}
-
-// splitLines breaks a string into lines, preserving empty lines.
-func splitLines(s string) []string {
-	return splitByNewline(s)
-}
-
-func splitByNewline(s string) []string {
-	if s == "" {
-		return []string{""}
-	}
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			result = append(result, s[start:i])
-			start = i + 1
-		}
-	}
-	result = append(result, s[start:])
-	return result
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForegroundBlend(
+			charmtone.Cherry,
+			charmtone.Charple,
+			charmtone.Guac,
+			charmtone.Charple,
+			charmtone.Sriracha,
+		).
+		Width(width).
+		Render(content)
 }

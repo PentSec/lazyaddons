@@ -1,17 +1,17 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pentsec/lazyaddons/internal/config"
 	"github.com/pentsec/lazyaddons/internal/wowpath"
 )
 
 // viewProfilePicker renders the profile picker screen. The
-// layout is intentionally simple: title, list of profiles
-// (active one marked with a star, cursor with "> "), and a
-// help bar. The empty-profiles case shows a prompt.
+// layout is intentionally simple: title, glow-style list of
+// profiles (active one marked with a star), and a help bar. The
+// empty-profiles case shows a prompt.
 func viewProfilePicker(m *Model) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Profiles "))
@@ -25,27 +25,25 @@ func viewProfilePicker(m *Model) string {
 		return b.String()
 	}
 
-	for i, p := range m.Config.Profiles {
-		marker := "  "
-		if i == m.ProfileCursor {
-			marker = "> "
-		}
-		active := "  "
-		if m.ActiveProfile != nil && p.ID == m.ActiveProfile.ID {
-			active = "* "
-		}
-		row := fmt.Sprintf("%s%s%s", marker, active, p.Name)
-		if i == m.ProfileCursor {
-			b.WriteString(selectedStyle.Render(row))
-		} else {
-			b.WriteString(row)
-		}
-		b.WriteString("\n")
+	l := glowList(m.ProfileCursor, true)
+	for i := range m.Config.Profiles {
+		l.Item(profileGlowItem(m, &m.Config.Profiles[i]))
 	}
+	b.WriteString(l.String())
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render("enter switch • a add • r rename • d delete • esc back • q quit"))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// profileGlowItem renders one profile as a single-line glow list
+// item: name, starred when active.
+func profileGlowItem(m *Model, p *config.Profile) string {
+	name := p.Name
+	if m.ActiveProfile != nil && p.ID == m.ActiveProfile.ID {
+		name += " *"
+	}
+	return name
 }
 
 // updateProfilePicker handles the profile picker key bindings.

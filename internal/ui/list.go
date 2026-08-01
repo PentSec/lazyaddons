@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"charm.land/lipgloss/v2"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pentsec/lazyaddons/internal/config"
 )
 
@@ -84,6 +84,37 @@ func computeCols(inner int) colWidths {
 	}
 }
 
+// addonGlowRow renders one addon as a single-line glow list item
+// with fixed-width columns: name + status badge, then version,
+// track, last update date, and status label — all on one row.
+func addonGlowRow(m *Model, a config.Addon, cols colWidths) string {
+	name := a.Name
+	if len(name) > cols.Name {
+		name = name[:cols.Name-3] + "..."
+	}
+	ver := a.Version
+	if len(ver) > cols.Ver {
+		ver = ver[:cols.Ver-3] + "..."
+	}
+	track := a.TrackMode + ":" + a.TrackTarget
+	if len(track) > cols.Track {
+		track = track[:cols.Track-3] + "..."
+	}
+	updated := a.LastUpdated
+	if len(updated) > cols.Updated {
+		updated = updated[:cols.Updated]
+	}
+	status := renderBadge(m.Statuses[a.Name])
+	label := m.Statuses[a.Name].Label()
+	return fmt.Sprintf("%-*s %-*s %-*s %s %-*s  %s",
+		cols.Name+1, name,
+		cols.Ver, ver,
+		cols.Track, track,
+		status,
+		cols.Updated, updated,
+		label)
+}
+
 func viewList(m *Model) string {
 	if m.Width == 0 {
 		m.Width = 80
@@ -150,64 +181,42 @@ func viewList(m *Model) string {
 		m.ScrollOffset = 0
 	}
 
-	// Column headers.
+	// Column headers. The leading padding mirrors the glow
+	// enumerator (margin 1 + marker 2) so headers line up with the
+	// rows.
 	b.WriteString(dimStyle.Render(fmt.Sprintf("%d addons", shown)))
 	b.WriteString("\n")
 	b.WriteString(headerStyle.Render(
-		fmt.Sprintf("%-*s %-*s %-*s %-*s  %-*s  %s",
-			cols.Name+2, "NAME",
+		fmt.Sprintf("   %-*s %-*s %-*s %s %-*s  %s",
+			cols.Name+1, "NAME",
 			cols.Ver, "VER",
 			cols.Track, "TRACK",
-			1, "S",
+			"S",
 			cols.Updated, "UPDATED",
 			""),
 	))
 	b.WriteString("\n")
 
-	// Render visible rows.
+	// Glow-style list of the visible addons. The selected index is
+	// resolved within the visible window so scrolling keeps the
+	// highlight on the right addon.
 	viewStart := m.ScrollOffset
 	viewEnd := viewStart + visible
+	selInWindow := -1
+	items := make([]string, 0, visible)
 	for i := viewStart; i < viewEnd; i++ {
 		a := filtered[i]
-		// Find real index for selection highlighting.
-		realIdx := activeAddonsIndex(m, a.Name)
-		marker := "  "
-		if realIdx == m.Selection {
-			marker = "> "
+		if activeAddonsIndex(m, a.Name) == m.Selection {
+			selInWindow = len(items)
 		}
-		name := a.Name
-		if len(name) > cols.Name {
-			name = name[:cols.Name-3] + "..."
-		}
-		ver := a.Version
-		if len(ver) > cols.Ver {
-			ver = ver[:cols.Ver-3] + "..."
-		}
-		track := a.TrackMode + ":" + a.TrackTarget
-		if len(track) > cols.Track {
-			track = track[:cols.Track-3] + "..."
-		}
-		status := renderBadge(m.Statuses[a.Name])
-		label := m.Statuses[a.Name].Label()
-		updated := a.LastUpdated
-		if len(updated) > cols.Updated {
-			updated = updated[:cols.Updated]
-		}
-		row := fmt.Sprintf("%s %-*s %-*s %-*s %s %-*s  %s",
-			marker,
-			cols.Name+1, name,
-			cols.Ver, ver,
-			cols.Track, track,
-			status,
-			cols.Updated, updated,
-			label)
-		if realIdx == m.Selection {
-			b.WriteString(selectedStyle.Render(row))
-		} else {
-			b.WriteString(row)
-		}
-		b.WriteString("\n")
+		items = append(items, addonGlowRow(m, a, cols))
 	}
+	l := glowList(selInWindow, false)
+	for _, it := range items {
+		l.Item(it)
+	}
+	b.WriteString(l.String())
+	b.WriteString("\n")
 
 	// Help bar with filter info.
 	b.WriteString("\n")
@@ -310,13 +319,13 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.AddError = ""
 		return *m, nil
 	case "d":
-			a := m.selectedAddon()
-			if a == nil {
-				return *m, nil
-			}
-			m.PendingRemove = a.Name
-			m.Screen = screenConfirmRemove
+		a := m.selectedAddon()
+		if a == nil {
 			return *m, nil
+		}
+		m.PendingRemove = a.Name
+		m.Screen = screenConfirmRemove
+		return *m, nil
 	case "u":
 		if len(activeAddons(m)) == 0 {
 			return *m, nil
