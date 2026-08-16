@@ -238,7 +238,7 @@ func viewList(m *Model) string {
 	if m.SearchQuery != "" {
 		b.WriteString(renderHelp("esc clear"))
 	} else {
-		b.WriteString(renderHelp("/ search", "a add", "d remove", "enter update", "p profiles", "q quit"))
+		b.WriteString(renderHelp("/ search", "a add", "d remove", "U update all", "p profiles", "? help", "q quit"))
 	}
 	return b.String()
 }
@@ -281,6 +281,17 @@ func activeAddons(m *Model) []config.Addon {
 		return nil
 	}
 	return m.ActiveProfile.Addons
+}
+
+// addonsToUpdate returns the subset of addons that have StatusUpdate.
+func addonsToUpdate(addons []config.Addon, statuses map[string]AddonStatus) []config.Addon {
+	var out []config.Addon
+	for _, a := range addons {
+		if statuses[a.Name] == StatusUpdate {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // activeAddonsIndex returns the position of name in the active
@@ -330,6 +341,9 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.SearchActive = true
 		m.SearchQuery = ""
 		m.ScrollOffset = 0
+		return *m, nil
+	case "?":
+		m.Screen = screenKeybinds
 		return *m, nil
 	case "up", "k":
 		if m.Selection > 0 {
@@ -381,12 +395,20 @@ func updateList(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ProgressDetail = "Checking for updates..."
 		return *m, tea.Batch(spinnerCmd(), applyAddonCmd(string(m.WowPath), *a, m.GitHub, m.ActiveProfile))
 	case "U":
-		if m.UpdateBanner == nil || !m.UpdateBanner.UpdateAvailable {
+		// Self-update takes priority when a new version is available.
+		if m.UpdateBanner != nil && m.UpdateBanner.UpdateAvailable {
+			m.startProgress("Downloading lazyaddons update...", 1, 1)
+			m.ProgressDetail = "Downloading new version..."
+			return *m, tea.Batch(spinnerCmd(), selfUpdateCmd(m.UpdateBanner.LatestVersion))
+		}
+		// Update all addons that have updates available.
+		updatable := addonsToUpdate(activeAddons(m), m.Statuses)
+		if len(updatable) == 0 {
 			return *m, nil
 		}
-		m.startProgress("Downloading lazyaddons update...", 1, 1)
-		m.ProgressDetail = "Downloading new version..."
-		return *m, tea.Batch(spinnerCmd(), selfUpdateCmd(m.UpdateBanner.LatestVersion))
+		m.UpdatingAll = true
+		m.startProgress(fmt.Sprintf("Updating %d addon(s)...", len(updatable)), 1, 1)
+		return *m, tea.Batch(spinnerCmd(), applyAllUpdatesCmd(string(m.WowPath), updatable, m.GitHub, m.ActiveProfile))
 	case "p":
 		m.Screen = screenProfilePicker
 		// Reset cursor to the active profile on entry.

@@ -26,6 +26,9 @@ type updateAppliedMsg struct {
 	Err     error
 }
 
+// updateAllDoneMsg is posted when the "update all" sequence finishes.
+type updateAllDoneMsg struct{}
+
 // checkAllUpdatesCmd checks every tracked addon for updates.
 // Branch-tracked addons use IsBehind; release-tracked addons use
 // LatestNewTag to detect new version tags.
@@ -64,6 +67,154 @@ func checkAllUpdatesCmd(addonsRoot string, addons []config.Addon) tea.Cmd {
 // applyAddonCmd applies the update for a single addon.
 func applyAddonCmd(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
 	return applyOneUpdate(addonsRoot, a, ghClient, profile, 1, 1)
+}
+
+// applyAllUpdatesCmd sequentially updates every addon that needs it.
+// It reports progress for each addon (step N of total) and collects
+// the names of successfully updated and failed addons. Each addon's
+// steps are inlined into one flat tea.Sequence so Bubble Tea
+// processes each step message before moving to the next.
+func applyAllUpdatesCmd(addonsRoot string, addons []config.Addon, ghClient *gh.Client, profile *config.Profile) tea.Cmd {
+	total := len(addons)
+	var seq []tea.Cmd
+
+	for i, a := range addons {
+		step := i + 1
+		if a.TrackMode == addon.TrackModeRelease {
+			seq = append(seq, buildReleaseUpdateSteps(addonsRoot, a, ghClient, profile, step, total)...)
+		} else {
+			seq = append(seq, buildBranchUpdateSteps(addonsRoot, a, profile, step, total)...)
+		}
+	}
+
+	// Final message: the profile was mutated in-place by each step.
+	return tea.Sequence(append(seq, func() tea.Msg {
+		return updateAllDoneMsg{}
+	})...)
+}
+
+// buildReleaseUpdateSteps returns the inlined steps for one release-tracked addon.
+func buildReleaseUpdateSteps(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile, step, total int) []tea.Cmd {
+	return []tea.Cmd{
+		// Step header
+		func() tea.Msg {
+			return progressStepMsg{
+				Label: fmt.Sprintf("Updating %s...", a.Name),
+				Step:  step,
+				Total: total,
+			}
+		},
+		func() tea.Msg { return progressDetailMsg{Detail: "Checking latest release..."} },
+		// Fetch latest tag
+		func() tea.Msg {
+			if ghClient == nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: github client not available", a.Name)}
+			}
+			owner, repo, err := gh.ParseOwnerRepo(a.URL)
+			if err != nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			repoDir := findRepoDir(addonsRoot, a.Name)
+			targetTag := a.TrackTarget
+			if repoDir != "" {
+				if latest, _ := gitops.LatestNewTag(repoDir, a.TrackTarget); latest != "" {
+					targetTag = latest
+				}
+			}
+			rel, err := ghClient.ReleaseForTag(owner, repo, targetTag)
+			if err != nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			if rel == nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: release %s not found", a.Name, targetTag)}
+			}
+			zipAsset := rel.FindZipAsset()
+			if zipAsset == nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: no zip asset in release %s", a.Name, targetTag)}
+			}
+			// Download
+			var buf bytes.Buffer
+			if _, err := ghClient.DownloadAsset(zipAsset.BrowserURL, &buf); err != nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			// Extract
+			known := append([]string{a.Name}, a.SubModules...)
+			promoted, err := addon.UnpackReleaseZip(addonsRoot, bytes.NewReader(buf.Bytes()), int64(buf.Len()), known)
+			if err != nil {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: %w", a.Name, err)}
+			}
+			if len(promoted) == 0 {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: no valid .toc found in release zip", a.Name)}
+			}
+			a.TrackTarget = targetTag
+			if profile != nil {
+				for i := range profile.Addons {
+					if profile.Addons[i].Name == a.Name {
+						profile.Addons[i].TrackTarget = a.TrackTarget
+						break
+					}
+				}
+			}
+			return updateAppliedMsg{Updated: []string{a.Name}}
+		},
+	}
+}
+
+// buildBranchUpdateSteps returns the inlined steps for one branch-tracked addon.
+func buildBranchUpdateSteps(addonsRoot string, a config.Addon, profile *config.Profile, step, total int) []tea.Cmd {
+	return []tea.Cmd{
+		// Step header
+		func() tea.Msg {
+			return progressStepMsg{
+				Label: fmt.Sprintf("Updating %s...", a.Name),
+				Step:  step,
+				Total: total,
+			}
+		},
+		func() tea.Msg { return progressDetailMsg{Detail: "Preparing repository..."} },
+		// Find repo + reset
+		func() tea.Msg {
+			repoDir := findRepoDir(addonsRoot, a.Name)
+			if repoDir == "" {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: repo not found", a.Name)}
+			}
+			_ = gitops.ResetWorkingTree(repoDir)
+			return nil
+		},
+		func() tea.Msg { return progressDetailMsg{Detail: "Fetching updates..."} },
+		// Fetch
+		func() tea.Msg {
+			repoDir := findRepoDir(addonsRoot, a.Name)
+			if repoDir != "" {
+				_ = gitops.Fetch(repoDir)
+			}
+			return nil
+		},
+		func() tea.Msg { return progressDetailMsg{Detail: "Pulling changes..."} },
+		// Pull + reset
+		func() tea.Msg {
+			repoDir := findRepoDir(addonsRoot, a.Name)
+			if repoDir == "" {
+				return updateAppliedMsg{Err: fmt.Errorf("%s: repo not found", a.Name)}
+			}
+			if err := gitops.Pull(repoDir); err != nil {
+				if branch := gitops.DefaultBranch(repoDir); branch != "" {
+					_ = gitops.MergeFF(repoDir, "refs/remotes/origin/"+branch)
+				}
+			}
+			_ = gitops.ResetWorkingTree(repoDir)
+			return nil
+		},
+		func() tea.Msg { return progressDetailMsg{Detail: "Unpacking addon files..."} },
+		// Unpack
+		func() tea.Msg {
+			repoDir := findRepoDir(addonsRoot, a.Name)
+			if repoDir != "" {
+				addon.UnpackUpdate(addonsRoot, repoDir, a.SubModules)
+			}
+			return updateAppliedMsg{Updated: []string{a.Name}}
+		},
+	}
 }
 
 func applyOneUpdate(addonsRoot string, a config.Addon, ghClient *gh.Client, profile *config.Profile, step, total int) tea.Cmd {
@@ -334,6 +485,11 @@ func (m *Model) handleUpdatesChecked(msg updatesCheckedMsg) tea.Cmd {
 // handleUpdateApplied processes the result of applying updates.
 func (m *Model) handleUpdateApplied(msg updateAppliedMsg) {
 	if msg.Err != nil {
+		// During batch update-all, silently continue — the error
+		// is part of the sequence and shouldn't stop the flow.
+		if m.UpdatingAll {
+			return
+		}
 		m.ErrMessage = fmt.Sprintf("Update failed: %v", msg.Err)
 		m.Screen = screenError
 		return
@@ -342,5 +498,16 @@ func (m *Model) handleUpdateApplied(msg updateAppliedMsg) {
 		m.Statuses[name] = StatusOK
 		m.refreshAddonMeta(name)
 	}
+	// During batch update-all, stay on progress screen — the
+	// sequence is still running. Only switch to list when done.
+	if !m.UpdatingAll {
+		m.Screen = screenList
+	}
+}
+
+// handleUpdateAllDone finishes the batch "update all" flow. It
+// clears the UpdatingAll flag and returns to the list screen.
+func (m *Model) handleUpdateAllDone() {
+	m.UpdatingAll = false
 	m.Screen = screenList
 }

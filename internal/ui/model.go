@@ -38,6 +38,8 @@ const (
 	screenProfileAdd
 	screenProfileRename
 	screenProfileDelete
+	// screenKeybinds is a modal overlay showing all keybindings.
+	screenKeybinds
 )
 
 // String returns a stable identifier for the screen, useful for
@@ -70,6 +72,8 @@ func (s screen) String() string {
 		return "profileRename"
 	case screenProfileDelete:
 		return "profileDelete"
+	case screenKeybinds:
+		return "keybinds"
 	}
 	return "unknown"
 }
@@ -198,10 +202,18 @@ type Model struct {
 	// Self-update state
 	UpdateBanner *update.CheckResult
 
+	// UpdatingAll is set while a batch "update all" is running.
+	// While true, individual updateAppliedMsg results don't
+	// switch to screenList — the sequence keeps running.
+	UpdatingAll bool
+
 	// List scroll and search state
 	SearchQuery  string
 	SearchActive bool
 	ScrollOffset int
+
+	// Keybinds modal scroll state
+	KeybindScroll int
 
 	// Profile picker state
 	ProfileCursor int // index of selected profile in picker
@@ -324,6 +336,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case updateAppliedMsg:
 		m.handleUpdateApplied(msg)
 		return m, nil
+	case updateAllDoneMsg:
+		m.handleUpdateAllDone()
+		return m, nil
 	case selfUpdateDoneMsg:
 		handleSelfUpdateDone(&m, msg)
 		return m, nil
@@ -375,6 +390,8 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return updateProfileRename(&m, key)
 	case screenProfileDelete:
 		return updateProfileDelete(&m, key)
+	case screenKeybinds:
+		return updateKeybinds(&m, key)
 	}
 	return m, nil
 }
@@ -414,6 +431,8 @@ func (m Model) View() string {
 		content = viewProfileRename(&m)
 	case screenProfileDelete:
 		content = viewProfileDelete(&m)
+	case screenKeybinds:
+		content = viewKeybindsModal(&m)
 	default:
 		content = fmt.Sprintf("unknown screen %d", m.Screen)
 	}
