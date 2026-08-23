@@ -55,6 +55,35 @@ go build -o lazyaddons ./cmd/lazyaddons/
 
 **Requirements**: Go 1.26+ (build from source only — pre-built binaries need nothing).
 
+### Uninstall
+
+```bash
+# Linux / macOS
+curl -sSL https://raw.githubusercontent.com/pentsec/lazyaddons/main/uninstall.sh | bash
+
+# Or download and run
+./uninstall.sh
+
+# Skip confirmation
+./uninstall.sh --force
+
+# Keep config and WoW data
+./uninstall.sh --keep-config --keep-data
+```
+
+* Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/pentsec/lazyaddons/main/uninstall.ps1 | iex
+
+# Skip confirmation
+.\uninstall.ps1 -Force
+
+# Keep config
+.\uninstall.ps1 -KeepConfig
+```
+
+The uninstaller removes the binary, configuration directory, and WoW addon data (`.lazyaddons/`, `.backup/`). Addon folders inside `AddOns/` are **not** removed — they are managed independently.
+
 ---
 
 ## Usage

@@ -32,6 +32,8 @@ archives:
     files:
       - LICENSE
       - README.md
+      - uninstall.sh
+      - uninstall.ps1
 
 checksum:
   name_template: "checksums.txt"
