@@ -51,6 +51,46 @@ func TestResolve_AcceptsAddOnsDirectly(t *testing.T) {
 	}
 }
 
+func TestResolve_AcceptsRootWithDirectAddOns(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	addons := filepath.Join(root, "AddOns")
+	if err := os.MkdirAll(addons, 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// No Interface/ layer: the root holds AddOns directly.
+	got, err := Resolve(root)
+	if err != nil {
+		t.Fatalf("Resolve(root) returned error: %v", err)
+	}
+
+	if got.String() != filepath.Clean(addons) {
+		t.Errorf("Resolve(root) = %q, want %q", got, addons)
+	}
+}
+
+func TestResolve_PrefersInterfaceAddOnsWhenBothExist(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	iface := filepath.Join(root, "Interface", "AddOns")
+	direct := filepath.Join(root, "AddOns")
+	for _, d := range []string{iface, direct} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	got, err := Resolve(root)
+	if err != nil {
+		t.Fatalf("Resolve(root) returned error: %v", err)
+	}
+
+	if got.String() != filepath.Clean(iface) {
+		t.Errorf("Resolve(root) = %q, want %q", got, iface)
+	}
+}
+
 func TestResolve_RejectsNonExistentPath(t *testing.T) {
 	t.Parallel()
 	bogus := filepath.Join(t.TempDir(), "does", "not", "exist")

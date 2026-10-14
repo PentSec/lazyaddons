@@ -20,9 +20,10 @@ import (
 var ErrNoWoWPath = errors.New("wowpath: WoW installation path is not set")
 
 // ErrNoAddOnsFolder is returned when the resolved path does not contain
-// the conventional Interface/AddOns subdirectory, signalling either a
-// malformed user-provided path or a corrupt install.
-var ErrNoAddOnsFolder = errors.New("wowpath: Interface/AddOns folder not found")
+// an AddOns subdirectory (either <root>/Interface/AddOns or a direct
+// <root>/AddOns), signalling either a malformed user-provided path or a
+// corrupt install.
+var ErrNoAddOnsFolder = errors.New("wowpath: AddOns folder not found")
 
 // Path is the resolved absolute path to a WoW AddOns folder. It is
 // always cleaned and uses the platform-specific separator.
@@ -119,8 +120,21 @@ func Resolve(wowRoot string) (Path, error) {
 		// Interface without trailing slash.
 		candidate = filepath.Join(cleaned, "AddOns")
 	default:
-		// Assume it's the WoW root directory.
-		candidate = filepath.Join(cleaned, "Interface", "AddOns")
+		// Assume it's the WoW root directory. Accept both layouts:
+		// the conventional Interface/AddOns and a root that holds
+		// an AddOns folder directly.
+		ifaceAddons := filepath.Join(cleaned, "Interface", "AddOns")
+		directAddons := filepath.Join(cleaned, "AddOns")
+		switch {
+		case dirExists(ifaceAddons):
+			candidate = ifaceAddons
+		case dirExists(directAddons):
+			candidate = directAddons
+		default:
+			// Neither exists — keep the conventional path so the
+			// validation error names a sensible location.
+			candidate = ifaceAddons
+		}
 	}
 
 	abs, err := filepath.Abs(candidate)
@@ -279,6 +293,12 @@ func dedupeCandidates(c []string) []string {
 // sometimes have spaces; Unicode is preserved.
 func cleanSegment(s string) (string, error) {
 	return safepath.Validate(s)
+}
+
+// dirExists reports whether path exists and is a directory.
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }
 
 // IsWritable returns true if the process can create files in dir.

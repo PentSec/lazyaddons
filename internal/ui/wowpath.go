@@ -80,7 +80,7 @@ func viewWowPath(m *Model) string {
 	b.WriteString("Or type a custom path:\n\n")
 	b.WriteString("> " + m.WowPathInput)
 	if m.WowPathInput == "" {
-		b.WriteString(dimStyle.Render("/path/to/WoW/Interface/AddOns"))
+		b.WriteString(dimStyle.Render("/path/to/WoW (or its AddOns folder)"))
 	}
 	b.WriteString("\n\n")
 
