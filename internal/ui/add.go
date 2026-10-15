@@ -175,13 +175,13 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 	newRepoDir := filepath.Join(addonsRoot, ".lazyaddons", name)
 	if st, err := os.Stat(newRepoDir); err == nil && st.IsDir() {
 		if gi, err := os.Stat(filepath.Join(newRepoDir, ".git")); err == nil && gi.IsDir() {
-			m.ActiveProfile.UpsertAddon(config.Addon{
-				Name: name, URL: url,
-				TrackMode: mode, TrackTarget: target,
-			})
-			m.Statuses[name] = StatusOK
-			m.Screen = screenList
-			return nil
+			// The addon folders a nested repository installs are
+			// named after their .toc files, not after the repo, so
+			// ask before overwriting them.
+			if targets := addon.ExistingTargets(addonsRoot, newRepoDir); len(targets) > 0 {
+				return m.promptReplace("", name, url, mode, target, newRepoDir, targets)
+			}
+			return m.resumeExistingRepo(name, url, mode, target, newRepoDir)
 		}
 	}
 	// Already cloned (legacy .repo style)?
@@ -199,14 +199,7 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 	}
 	// Folder exists but is NOT a git repo — let user choose.
 	if st, err := os.Stat(destDir); err == nil && st.IsDir() {
-		m.ReplaceFolder = destDir
-		m.ReplaceName = name
-		m.ReplaceURL = url
-		m.ReplaceMode = mode
-		m.ReplaceTarget = target
-		m.ReplaceSel = 0
-		m.Screen = screenConfirmReplace
-		return nil
+		return m.promptReplace(destDir, name, url, mode, target, "", nil)
 	}
 
 	m.startProgress(fmt.Sprintf("Cloning %s...", name), 1, 1)
@@ -220,6 +213,82 @@ func (m *Model) startClone(name, url, mode, target string) tea.Cmd {
 			Mode:   mode,
 			Target: target,
 		}),
+	)
+}
+
+// promptReplace asks the user what to do when installing a
+// repository would overwrite addon folders that already exist:
+// keep them, which abandons the install and changes nothing, or
+// replace them, which backs them up to .backup/ and installs the
+// repository copy. folder is the destination when it exists before
+// cloning; repoDir is set when the repository is already on disk
+// and only needs unpacking, in which case targets lists the addon
+// folders that unpacking would overwrite.
+func (m *Model) promptReplace(folder, name, url, mode, target, repoDir string, targets []string) tea.Cmd {
+	m.ReplaceFolder = folder
+	m.ReplaceName = name
+	m.ReplaceURL = url
+	m.ReplaceMode = mode
+	m.ReplaceTarget = target
+	m.ReplaceTargets = targets
+	m.ReplaceRepoDir = repoDir
+	m.ReplaceSel = 0
+	m.Screen = screenConfirmReplace
+	return nil
+}
+
+// promoteCmd runs the post-clone step that unpacks the addon
+// folders out of a repository and into the AddOns root. With
+// allowEmpty false an empty result is an error: a freshly cloned
+// repo that yields no addon folder is not a WoW addon. Re-adding a
+// repo whose folders were already unpacked passes true, because
+// there is simply nothing left to move and the repo still gets
+// tracked under its repository name.
+func promoteCmd(addonsRoot, repoDir string, a clonePostDoneMsg, allowEmpty bool) tea.Cmd {
+	return func() tea.Msg {
+		// Resolve the branch before promoting: the flat layout can
+		// rename the repository directory while promoting.
+		if a.DefaultBranch == "" {
+			a.DefaultBranch = gitops.DefaultBranch(repoDir)
+		}
+		promoted, err := addon.PromoteAddonDirs(addonsRoot, repoDir)
+		if err != nil {
+			a.Err = fmt.Errorf("Failed to restructure %s: %v", a.Name, err)
+			return a
+		}
+		if len(promoted) == 0 && !allowEmpty {
+			a.Err = fmt.Errorf("No .toc found in %s: no folder in the repository contains a matching .toc file.", a.Name)
+			return a
+		}
+		a.Promoted = promoted
+		a.AddonsRoot = addonsRoot
+		return a
+	}
+}
+
+// resumeExistingRepo finishes an add whose repository is already on
+// disk: a previous attempt cloned it but failed, or was interrupted,
+// before the addon folders were unpacked. Promotion is the step that
+// does that unpacking, so it runs here too instead of tracking an
+// addon that has no folder in AddOns.
+func (m *Model) resumeExistingRepo(name, url, mode, target, repoDir string) tea.Cmd {
+	m.PendingAddon.Name = name
+	m.PendingAddon.URL = url
+	m.PendingAddon.Mode = mode
+	m.PendingAddon.Target = target
+
+	addonsRoot := string(m.WowPath)
+	m.startProgress(fmt.Sprintf("Unpacking %s...", name), 1, 1)
+	m.ProgressDetail = "Moving addon folders..."
+
+	return tea.Batch(
+		spinnerCmd(),
+		promoteCmd(addonsRoot, repoDir, clonePostDoneMsg{
+			Name:   name,
+			URL:    url,
+			Mode:   mode,
+			Target: target,
+		}, true),
 	)
 }
 
@@ -240,26 +309,23 @@ func (m *Model) handleCloneDone(msg cloneDoneMsg) tea.Cmd {
 	destDir, _ := m.WowPath.AddonPath(msg.Name)
 	addonsRoot := string(m.WowPath)
 
+	// Installing this repository would overwrite addon folders that
+	// are already on disk. The clone is done but nothing was
+	// unpacked yet, so this is the last moment where the user can
+	// still back out.
+	if targets := addon.ExistingTargets(addonsRoot, destDir); len(targets) > 0 {
+		return m.promptReplace("", msg.Name, msg.URL, msg.Mode, msg.Target, destDir, targets)
+	}
+
 	return tea.Sequence(
 		sendDetail("Moving addon folders..."),
-		func() tea.Msg {
-			promoted, err := addon.PromoteAddonDirs(addonsRoot, destDir)
-			if err != nil {
-				return clonePostDoneMsg{Err: fmt.Errorf("Failed to restructure %s: %v", msg.Name, err)}
-			}
-			if len(promoted) == 0 {
-				return clonePostDoneMsg{Err: fmt.Errorf("No valid .toc found in %s.", msg.Name)}
-			}
-			return clonePostDoneMsg{
-				Name:          msg.Name,
-				URL:           msg.URL,
-				Mode:          msg.Mode,
-				Target:        msg.Target,
-				DefaultBranch: msg.DefaultBranch,
-				Promoted:      promoted,
-				AddonsRoot:    addonsRoot,
-			}
-		},
+		promoteCmd(addonsRoot, destDir, clonePostDoneMsg{
+			Name:          msg.Name,
+			URL:           msg.URL,
+			Mode:          msg.Mode,
+			Target:        msg.Target,
+			DefaultBranch: msg.DefaultBranch,
+		}, false),
 	)
 }
 
@@ -370,21 +436,45 @@ func defaultTrackTarget(target, detected string) string {
 	return "main"
 }
 
+// conflictingFolders lists the addon folders this install would
+// overwrite: the TOC-named folders of a nested repository when
+// known, otherwise the single destination folder checked before
+// cloning.
+func conflictingFolders(m *Model) []string {
+	if len(m.ReplaceTargets) > 0 {
+		return m.ReplaceTargets
+	}
+	if m.ReplaceFolder != "" {
+		return []string{m.ReplaceName}
+	}
+	return nil
+}
+
 // viewConfirmReplace renders the "folder exists — keep or replace?" prompt.
 func viewConfirmReplace(m *Model) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(" Folder already exists "))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf(
-		"%s already exists in AddOns\nbut is not tracked by lazyaddons.",
-		m.ReplaceName,
-	))
+
+	folders := conflictingFolders(m)
+	switch {
+	case len(folders) > 1:
+		b.WriteString("These addon folders already exist in AddOns\nbut are not tracked by lazyaddons:\n")
+		for _, f := range folders {
+			b.WriteString(dimStyle.Render("  "+f) + "\n")
+		}
+	case len(folders) == 1:
+		b.WriteString(fmt.Sprintf(
+			"%s already exists in AddOns\nbut is not tracked by lazyaddons.",
+			folders[0],
+		))
+	}
 	b.WriteString("\n\n")
 
 	keepMarker := "  "
 	replaceMarker := "  "
 	keepLine := "  Keep existing — return to the list without changes"
-	replaceLine := "  Replace — back up existing folder to .backup/, then clone fresh"
+	replaceLine := "  Replace — back up the existing folders to .backup/, then install the repo copy"
 
 	if m.ReplaceSel == 0 {
 		keepMarker = "> "
@@ -414,28 +504,50 @@ func updateConfirmReplace(m *Model, key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.ReplaceSel == 0 {
 			// Keep existing — return to list without changes.
+			// A repository that was already cloned stays on disk,
+			// so the next add of the same URL resumes it.
 			m.ReplaceFolder = ""
+			m.ReplaceTargets = nil
+			m.ReplaceRepoDir = ""
 			m.Screen = screenList
 			return *m, nil
 		}
 		return doReplace(m)
 	case "esc":
 		m.ReplaceFolder = ""
+		m.ReplaceTargets = nil
+		m.ReplaceRepoDir = ""
 		m.Screen = screenList
 		return *m, nil
 	}
 	return *m, nil
 }
 
-// doReplace backs up the existing addon folder to .backup/,
-// then proceeds with clone.
+// doReplace backs up the existing addon folder(s) to .backup/,
+// then proceeds with the install.
 func doReplace(m *Model) (tea.Model, tea.Cmd) {
+	if m.ReplaceRepoDir != "" {
+		// The repository is already on disk — unpacking it is the
+		// only step left, and it backs up and overwrites the
+		// conflicting folders itself.
+		repoDir := m.ReplaceRepoDir
+		name := m.ReplaceName
+		url := m.ReplaceURL
+		mode := m.ReplaceMode
+		target := m.ReplaceTarget
+		m.ReplaceFolder = ""
+		m.ReplaceRepoDir = ""
+		m.ReplaceTargets = nil
+		return *m, m.resumeExistingRepo(name, url, mode, target, repoDir)
+	}
+
 	destDir := m.ReplaceFolder
 	name := m.ReplaceName
 	url := m.ReplaceURL
 	mode := m.ReplaceMode
 	target := m.ReplaceTarget
 	m.ReplaceFolder = ""
+	m.ReplaceTargets = nil
 
 	// Back up the existing folder before cloning.
 	bk := backup.New(string(m.WowPath))

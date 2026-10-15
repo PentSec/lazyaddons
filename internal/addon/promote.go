@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pentsec/lazyaddons/internal/backup"
 )
 
 // PromoteAddonDirs unpacks a cloned addon repository following
@@ -26,18 +28,17 @@ func PromoteAddonDirs(addonsRoot, cloneDir string) ([]string, error) {
 	subAddons := ScanTOCSubdirs(cloneDir)
 	mainIsNested := hasSubAddon(subAddons, cloneBase)
 
-	// Always rename the clone to .lazyaddons/<name> so .git has a
-	// permanent home independent of the unpacked addon dirs.
+	// Park the clone under .lazyaddons/ so .git has a permanent
+	// home independent of the unpacked addon dirs. Both layouts
+	// (nested and flat) need the same rename, so it lives here
+	// once. A caller may pass a repo that is already parked there
+	// — re-adding after an interrupted install — in which case
+	// cloneDir and repoDir are the same path and there is nothing
+	// to rename.
 	lazyDir := filepath.Join(addonsRoot, ".lazyaddons")
 	_ = os.MkdirAll(lazyDir, 0o755)
 	repoDir := filepath.Join(lazyDir, cloneBase)
-	if mainIsNested {
-		if err := os.Rename(cloneDir, repoDir); err != nil {
-			return nil, fmt.Errorf("addon: rename %s -> %s: %w", cloneDir, repoDir, err)
-		}
-	} else {
-		// Flat addon: rename clone to .repo too, then move the
-		// addon folder back out. This keeps .git in .repo/.
+	if filepath.Clean(cloneDir) != filepath.Clean(repoDir) {
 		if err := os.Rename(cloneDir, repoDir); err != nil {
 			return nil, fmt.Errorf("addon: rename %s -> %s: %w", cloneDir, repoDir, err)
 		}
@@ -51,7 +52,19 @@ func PromoteAddonDirs(addonsRoot, cloneDir string) ([]string, error) {
 		src := filepath.Join(repoDir, name)
 		dst := filepath.Join(addonsRoot, name)
 		if _, err := os.Stat(dst); err == nil {
-			continue // already exists, don't overwrite
+			// The folder already exists — almost always a manual
+			// install that was never tracked. Back it up, then
+			// swap in the fresh copy so what is on disk matches
+			// the repo just cloned. If the swap fails, keep the
+			// folder that is there and still report it: a target
+			// silently dropped here makes the whole repo look
+			// like it has no .toc, and the add fails.
+			_ = backup.New(addonsRoot).Create(name)
+			_ = os.RemoveAll(dst)
+			if _, err := os.Stat(dst); err == nil {
+				promoted = append(promoted, name)
+				continue
+			}
 		}
 		if err := os.Rename(src, dst); err != nil {
 			continue // best-effort, the copy in .repo is the source of truth
@@ -102,6 +115,52 @@ func PromoteAddonDirs(addonsRoot, cloneDir string) ([]string, error) {
 	cleanRepoJunk(repoDir)
 
 	return promoted, nil
+}
+
+// ExistingTargets reports which addon folders PromoteAddonDirs would
+// have to overwrite when unpacking repoDir: every addon the
+// repository installs — a sub-directory with a matching .toc, or the
+// repository root itself for a flat addon — whose folder already
+// exists in addonsRoot. Callers show this list to the user before
+// touching those folders.
+func ExistingTargets(addonsRoot, repoDir string) []string {
+	cloneBase := filepath.Base(repoDir)
+	subAddons := ScanTOCSubdirs(repoDir)
+	mainIsNested := hasSubAddon(subAddons, cloneBase)
+
+	// A folder that is the clone itself is not an existing install:
+	// a nested main addon named after the repository, or a flat
+	// addon, unpacks onto the very path the clone sits in.
+	isInstalled := func(name string) bool {
+		dst := filepath.Join(addonsRoot, name)
+		if filepath.Clean(dst) == filepath.Clean(repoDir) {
+			return false
+		}
+		return isDir(dst)
+	}
+
+	var targets []string
+	for _, name := range subAddons {
+		if isInstalled(name) {
+			targets = append(targets, name)
+		}
+	}
+	if !mainIsNested && repoDirHasTOC(repoDir) {
+		actualName := cloneBase
+		if tocName := tocAddonName(repoDir); tocName != "" {
+			actualName = tocName
+		}
+		if isInstalled(actualName) {
+			targets = append(targets, actualName)
+		}
+	}
+	return targets
+}
+
+// isDir reports whether path exists and is a directory.
+func isDir(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }
 
 // UnpackUpdate moves addon directories from a git repo (already at

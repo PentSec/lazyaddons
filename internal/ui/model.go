@@ -198,6 +198,14 @@ type Model struct {
 	ReplaceMode   string
 	ReplaceTarget string
 	ReplaceSel    int // 0 = keep existing, 1 = replace
+	// ReplaceTargets lists every addon folder that installing this
+	// repository would overwrite (nested repos install folders
+	// named after their .toc files, not after the repository).
+	// ReplaceRepoDir points at the repository when it is already
+	// on disk and only needs unpacking; it is empty when the
+	// install still has to clone first.
+	ReplaceTargets []string
+	ReplaceRepoDir string
 
 	// Self-update state
 	UpdateBanner *update.CheckResult
