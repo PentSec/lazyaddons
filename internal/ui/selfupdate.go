@@ -33,10 +33,10 @@ func handleSelfUpdateDone(m *Model, msg selfUpdateDoneMsg) {
 		m.Screen = screenError
 		return
 	}
-	m.ErrMessage = fmt.Sprintf(
+	m.SuccessMessage = fmt.Sprintf(
 		"lazyaddons updated to %s!\nRestart the application to use the new version.",
 		msg.NewVersion,
 	)
 	m.PendingQuit = true
-	m.Screen = screenError
+	m.Screen = screenSuccess
 }

@@ -27,6 +27,10 @@ const (
 	screenReleasePicker
 	screenProgress
 	screenError
+	// screenSuccess is the informational counterpart to
+	// screenError: it reports an operation that worked (e.g. a
+	// self-update that needs a restart) instead of a failure.
+	screenSuccess
 	screenWowPath
 	screenWowBrowse
 	screenConfirmRemove
@@ -56,6 +60,8 @@ func (s screen) String() string {
 		return "progress"
 	case screenError:
 		return "error"
+	case screenSuccess:
+		return "success"
 	case screenWowPath:
 		return "wowPath"
 	case screenWowBrowse:
@@ -135,6 +141,10 @@ type Model struct {
 	Selection  int
 	Statuses   map[string]AddonStatus // keyed by addon.Name
 	ErrMessage string
+	// SuccessMessage is the text shown on screenSuccess, kept
+	// separate from ErrMessage so a successful operation is never
+	// rendered with the error title or styling.
+	SuccessMessage string
 	// PendingQuit is set when the error screen is informational and
 	// any key should quit the app instead of returning to the list
 	// (e.g. after a successful self-update that needs a restart).
@@ -373,14 +383,15 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return updateReleasePicker(&m, key)
 	case screenProgress:
 		return updateProgress(&m, key)
-	case screenError:
+	case screenError, screenSuccess:
+		// Both are full-screen messages dismissed by any key.
 		if m.PendingQuit {
 			m.PendingQuit = false
-			m.ErrMessage = ""
+			m.ErrMessage, m.SuccessMessage = "", ""
 			return m, tea.Quit
 		}
 		m.Screen = screenList
-		m.ErrMessage = ""
+		m.ErrMessage, m.SuccessMessage = "", ""
 		return m, nil
 	case screenWowPath:
 		return updateWowPath(&m, key)
@@ -423,6 +434,8 @@ func (m Model) View() string {
 		}
 	case screenError:
 		content = viewError(&m)
+	case screenSuccess:
+		content = viewSuccess(&m)
 	case screenWowPath:
 		content = viewWowPath(&m)
 	case screenWowBrowse:

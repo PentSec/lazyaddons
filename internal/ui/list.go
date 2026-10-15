@@ -604,6 +604,7 @@ var (
 	helpStyle         = lipgloss.NewStyle().Faint(true)
 	keyStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75"))
 	errorStyle        = lipgloss.NewStyle().Foreground(colorError)
+	successStyle      = lipgloss.NewStyle().Foreground(colorOK)
 	promptStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
 	progressStyle     = lipgloss.NewStyle().Foreground(colorInstall)
 	releaseSelStyle   = lipgloss.NewStyle().Bold(true)

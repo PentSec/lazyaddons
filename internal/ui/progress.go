@@ -110,3 +110,23 @@ func viewError(m *Model) string {
 	b.WriteString("\n")
 	return b.String()
 }
+
+// viewSuccess renders an informational screen for an operation that
+// worked. It is the counterpart to viewError: the full message is
+// shown, including follow-up instructions such as the restart hint
+// after a self-update, and it is styled as a success instead of a
+// failure.
+func viewSuccess(m *Model) string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(" Success "))
+	b.WriteString("\n\n")
+	b.WriteString(successStyle.Render(m.SuccessMessage))
+	b.WriteString("\n\n")
+	help := "any key to return"
+	if m.PendingQuit {
+		help = "any key to quit"
+	}
+	b.WriteString(renderHelp(help))
+	b.WriteString("\n")
+	return b.String()
+}
