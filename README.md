@@ -9,6 +9,10 @@ Install, update, rollback — all from your terminal. Linux, macOS, and Windows.
 
 ---
 
+### Support me ❤️ ⬎
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/D5R327PO99)
+
 ## Features
 
 - **Add from any git URL** — GitHub, GitLab, self-hosted repos
